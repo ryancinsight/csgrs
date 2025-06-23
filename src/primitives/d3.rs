@@ -21,7 +21,7 @@ impl<S: Clone + Debug + Send + Sync> CSG<S> {
         let p111 = Point3::new(width, length, height);
         let p011 = Point3::new(0.0, length, height);
 
-        // We’ll define 6 faces (each a Polygon), in an order that keeps outward-facing normals
+        // We'll define 6 faces (each a Polygon), in an order that keeps outward-facing normals
         // and consistent (counter-clockwise) vertex winding as viewed from outside the prism.
 
         // Bottom face (z=0, normal approx. -Z)
@@ -175,10 +175,12 @@ impl<S: Clone + Debug + Send + Sync> CSG<S> {
     ///
     /// # Example
     /// ```
+    /// use csgrs::CSG;
+    /// use nalgebra::Point3;
     /// let bottom = Point3::new(0.0, 0.0, 0.0);
     /// let top = Point3::new(0.0, 0.0, 5.0);
     /// // This will create a cone (bottom degenerate) because radius1 is 0:
-    /// let cone = CSG::frustum_ptp_special(bottom, top, 0.0, 2.0, 32, None);
+    /// let cone: CSG<()> = CSG::frustum_ptp(bottom, top, 0.0, 2.0, 32, None);
     /// ```
     pub fn frustum_ptp(
         start: Point3<Real>,
@@ -351,6 +353,7 @@ impl<S: Clone + Debug + Send + Sync> CSG<S> {
     ///
     /// # Example
     /// ```
+    /// use csgrs::CSG;
     /// let pts = &[
     ///     [0.0, 0.0, 0.0], // point0
     ///     [1.0, 0.0, 0.0], // point1
@@ -368,7 +371,7 @@ impl<S: Clone + Debug + Send + Sync> CSG<S> {
     ///     vec![3, 0, 4],
     /// ];
     ///
-    /// let csg_poly = CSG::polyhedron(pts, &fcs);
+    /// let csg_poly: CSG<()> = CSG::polyhedron(pts, &fcs, None);
     /// ```
     pub fn polyhedron(
         points: &[[Real; 3]],
@@ -405,7 +408,7 @@ impl<S: Clone + Debug + Send + Sync> CSG<S> {
             // Build the polygon (plane is auto-computed from first 3 vertices).
             let mut poly = Polygon::new(face_vertices, metadata.clone());
 
-            // Set each vertex normal to match the polygon’s plane normal,
+            // Set each vertex normal to match the polygon's plane normal,
             let plane_normal = poly.plane.normal();
             for v in &mut poly.vertices {
                 v.normal = plane_normal;
@@ -525,7 +528,7 @@ impl<S: Clone + Debug + Send + Sync> CSG<S> {
     /// direction, and finally translated so that either its base (if `orientation` is false)
     /// or its tip (if `orientation` is true) is located at `start`.
     ///
-    /// The arrow’s dimensions (shaft radius, head dimensions, etc.) are scaled proportionally to the
+    /// The arrow's dimensions (shaft radius, head dimensions, etc.) are scaled proportionally to the
     /// total arrow length (the norm of the provided direction).
     ///
     /// # Parameters
@@ -764,7 +767,7 @@ impl<S: Clone + Debug + Send + Sync> CSG<S> {
         segments_per_flank: usize,
         thickness: Real,
         helix_angle_deg: Real, // β
-        slices: usize,         // ≥ 2 – axial divisions
+        slices: usize,         // ≥ 2 – axial divisions
         metadata: Option<S>,
     ) -> CSG<S> {
         assert!(slices >= 2);

@@ -20,8 +20,9 @@ impl<S: Clone + Debug + Send + Sync> CSG<S> {
     /// Convert this CSG to an **ASCII STL** string with the given `name`.
     ///
     /// ```
-    /// let csg = CSG::cube(None);
-    /// let stl_text = csg.to_stl("my_solid");
+    /// use csgrs::CSG;
+    /// let csg: CSG<()> = CSG::cube(2.0, None);
+    /// let stl_text = csg.to_stl_ascii("my_solid");
     /// println!("{}", stl_text);
     /// ```
     pub fn to_stl_ascii(&self, name: &str) -> String {
@@ -34,7 +35,7 @@ impl<S: Clone + Debug + Send + Sync> CSG<S> {
         for poly in &self.polygons {
             // Ensure the polygon is tessellated, since STL is triangle-based.
             let triangles = poly.tessellate();
-            // A typical STL uses the face normal; we can take the polygon’s plane normal:
+            // A typical STL uses the face normal; we can take the polygon's plane normal:
             let normal = poly.plane.normal().normalize();
             for tri in triangles {
                 out.push_str(&format!(
@@ -60,7 +61,7 @@ impl<S: Clone + Debug + Send + Sync> CSG<S> {
         for geom in &self.geometry {
             match geom {
                 geo::Geometry::Polygon(poly2d) => {
-                    // Outer ring (in CCW for a typical “positive” polygon)
+                    // Outer ring (in CCW for a typical "positive" polygon)
                     let outer = poly2d
                         .exterior()
                         .coords_iter()
@@ -152,8 +153,14 @@ impl<S: Clone + Debug + Send + Sync> CSG<S> {
     /// The resulting `Vec<u8>` can then be written to a file or handled in memory:
     ///
     /// ```
+    /// # use csgrs::CSG;
+    /// # use std::error::Error;
+    /// # fn main() -> Result<(), Box<dyn Error>> {
+    /// let csg: CSG<()> = CSG::cube(2.0, None);
     /// let bytes = csg.to_stl_binary("my_solid")?;
     /// std::fs::write("my_solid.stl", bytes)?;
+    /// # Ok(())
+    /// # }
     /// ```
     #[cfg(feature = "stl-io")]
     pub fn to_stl_binary(&self, _name: &str) -> std::io::Result<Vec<u8>> {

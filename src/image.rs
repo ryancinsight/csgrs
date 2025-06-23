@@ -7,7 +7,7 @@ use nalgebra::{Point3, Vector3};
 use std::fmt::Debug;
 
 impl<S: Clone + Debug + Send + Sync> CSG<S> {
-    /// Builds a new CSG from the “on” pixels of a grayscale image,
+    /// Builds a new CSG from the "on" pixels of a grayscale image,
     /// tracing connected outlines (and holes) via the `contour_tracing` code.
     ///
     /// - `img`: a reference to a GrayImage
@@ -22,11 +22,11 @@ impl<S: Clone + Debug + Send + Sync> CSG<S> {
     ///
     /// # Example
     /// ```no_run
-    /// # use csgrs::csg::CSG;
+    /// # use csgrs::CSG;
     /// # use image::{GrayImage, Luma};
     /// # fn main() {
     /// let img: GrayImage = image::open("my_binary.png").unwrap().to_luma8();
-    /// let csg2d = CSG::from_image(&img, 128, true, None);
+    /// let csg2d: CSG<()> = CSG::from_image(&img, 128, true, None);
     /// // optionally extrude it:
     /// let shape3d = csg2d.extrude(5.0);
     /// # }
@@ -56,12 +56,12 @@ impl<S: Clone + Debug + Send + Sync> CSG<S> {
         }
 
         // Use contour_tracing::array::bits_to_paths to get a single SVG path string
-        // containing multiple “move” commands for each outline/hole.
+        // containing multiple "move" commands for each outline/hole.
         let svg_path = contour_tracing::array::bits_to_paths(bits, closepaths);
         // This might look like: "M1 0H4V1H1M6 0H11V5H6 ..." etc.
 
         // Parse the path string into one or more polylines. Each polyline
-        // starts with an 'M x y' and then “H x” or “V y” commands until the next 'M' or end.
+        // starts with an 'M x y' and then "H x" or "V y" commands until the next 'M' or end.
         let polylines = Self::parse_svg_path_into_polylines(&svg_path);
 
         // Convert each polyline into a Polygon in the XY plane at z=0,
@@ -107,7 +107,7 @@ impl<S: Clone + Debug + Send + Sync> CSG<S> {
 
         // We'll read tokens that could be:
         //  - a letter (M/H/V/Z)
-        //  - a number (which may be float, but from bits_to_paths it’s all integer steps)
+        //  - a number (which may be float, but from bits_to_paths it's all integer steps)
         //  - whitespace or other
         //
         // This small scanner accumulates tokens so we can parse them easily.
