@@ -1,10 +1,10 @@
-use crate::float_types::parry3d::{
+use crate::core::float_types::parry3d::{
     bounding_volume::Aabb,
 };
-use crate::float_types::rapier3d::prelude::*;
-use crate::float_types::{Real};
-use crate::polygon::Polygon;
-use crate::vertex::Vertex;
+use crate::core::float_types::rapier3d::prelude::*;
+use crate::core::float_types::{Real};
+use crate::geometry::Polygon;
+use crate::geometry::Vertex;
 use geo::{
     Coord, CoordsIter, Geometry,
     GeometryCollection, LineString, MultiPolygon, Polygon as GeoPolygon,
@@ -54,21 +54,21 @@ impl<S: Clone + Debug + Send + Sync> CSG<S> {
     }
 
     /// Helper to collect all vertices from the CSG.
-    #[cfg(not(feature = "parallel"))]
     pub fn vertices(&self) -> Vec<Vertex> {
-        self.polygons
-            .iter()
-            .flat_map(|p| p.vertices.clone())
-            .collect()
-    }
-
-    /// Parallel helper to collect all vertices from the CSG.
-    #[cfg(feature = "parallel")]
-    pub fn vertices(&self) -> Vec<Vertex> {
-        self.polygons
-            .par_iter()
-            .flat_map(|p| p.vertices.clone())
-            .collect()
+        #[cfg(feature = "parallel")]
+        {
+            self.polygons
+                .par_iter()
+                .flat_map(|p| p.vertices.clone())
+                .collect()
+        }
+        #[cfg(not(feature = "parallel"))]
+        {
+            self.polygons
+                .iter()
+                .flat_map(|p| p.vertices.clone())
+                .collect()
+        }
     }
 
     /// Build a CSG from an existing polygon list
@@ -80,68 +80,45 @@ impl<S: Clone + Debug + Send + Sync> CSG<S> {
 
     /// Convert internal polylines into polygons and return along with any existing internal polygons.
     pub fn to_polygons(&self) -> Vec<Polygon<S>> {
+        // Helper function to convert a geo::Polygon to a Vec<crate::geometry::Polygon>
+        fn geo_poly_to_csg_polys<S: Clone + Debug + Send + Sync>(
+            poly2d: &GeoPolygon<Real>,
+            metadata: &Option<S>,
+        ) -> Vec<Polygon<S>> {
+            let mut all_polygons = Vec::new();
+
+            // Handle the exterior ring
+            let outer_vertices_3d: Vec<_> = poly2d
+                .exterior()
+                .coords_iter()
+                .map(|c| Vertex::new(Point3::new(c.x, c.y, 0.0), Vector3::z()))
+                .collect();
+
+            if outer_vertices_3d.len() >= 3 {
+                all_polygons.push(Polygon::new(outer_vertices_3d, metadata.clone()));
+            }
+
+            // Handle interior rings (holes)
+            for ring in poly2d.interiors() {
+                let hole_vertices_3d: Vec<_> = ring
+                    .coords_iter()
+                    .map(|c| Vertex::new(Point3::new(c.x, c.y, 0.0), Vector3::z()))
+                    .collect();
+                if hole_vertices_3d.len() >= 3 {
+                    all_polygons.push(Polygon::new(hole_vertices_3d, metadata.clone()));
+                }
+            }
+            all_polygons
+        }
+
         self.geometry
             .iter()
             .flat_map(|geom| -> Vec<Polygon<S>> {
                 match geom {
-                    Geometry::Polygon(poly2d) => {
-                        let mut all_polygons = Vec::new();
-                        let outer_vertices_3d: Vec<_> = poly2d
-                            .exterior()
-                            .coords_iter()
-                            .map(|c| Vertex::new(Point3::new(c.x, c.y, 0.0), Vector3::z()))
-                            .collect();
-
-                        if outer_vertices_3d.len() >= 3 {
-                            all_polygons
-                                .push(Polygon::new(outer_vertices_3d, self.metadata.clone()));
-                        }
-
-                        for ring in poly2d.interiors() {
-                            let hole_vertices_3d: Vec<_> = ring
-                                .coords_iter()
-                                .map(|c| Vertex::new(Point3::new(c.x, c.y, 0.0), Vector3::z()))
-                                .collect();
-                            if hole_vertices_3d.len() >= 3 {
-                                all_polygons
-                                    .push(Polygon::new(hole_vertices_3d, self.metadata.clone()));
-                            }
-                        }
-                        all_polygons
-                    }
+                    Geometry::Polygon(poly2d) => geo_poly_to_csg_polys(poly2d, &self.metadata),
                     Geometry::MultiPolygon(multipoly) => multipoly
                         .iter()
-                        .flat_map(|poly2d| {
-                            let mut all_polygons = Vec::new();
-                            let outer_vertices_3d: Vec<_> = poly2d
-                                .exterior()
-                                .coords_iter()
-                                .map(|c| Vertex::new(Point3::new(c.x, c.y, 0.0), Vector3::z()))
-                                .collect();
-
-                            if outer_vertices_3d.len() >= 3 {
-                                all_polygons.push(Polygon::new(
-                                    outer_vertices_3d,
-                                    self.metadata.clone(),
-                                ));
-                            }
-
-                            for ring in poly2d.interiors() {
-                                let hole_vertices_3d: Vec<_> = ring
-                                    .coords_iter()
-                                    .map(|c| {
-                                        Vertex::new(Point3::new(c.x, c.y, 0.0), Vector3::z())
-                                    })
-                                    .collect();
-                                if hole_vertices_3d.len() >= 3 {
-                                    all_polygons.push(Polygon::new(
-                                        hole_vertices_3d,
-                                        self.metadata.clone(),
-                                    ));
-                                }
-                            }
-                            all_polygons
-                        })
+                        .flat_map(|poly2d| geo_poly_to_csg_polys(poly2d, &self.metadata))
                         .collect(),
                     _ => vec![],
                 }

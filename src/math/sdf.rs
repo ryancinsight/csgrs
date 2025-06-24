@@ -1,9 +1,9 @@
 //! Create `CSG`s by meshing signed distance fields ([sdf](https://en.wikipedia.org/wiki/Signed_distance_function)) within a bounding box.
 
 use crate::csg::CSG;
-use crate::float_types::Real;
-use crate::polygon::Polygon;
-use crate::vertex::Vertex;
+use crate::core::float_types::Real;
+use crate::geometry::Polygon;
+use crate::geometry::Vertex;
 use fast_surface_nets::{SurfaceNetsBuffer, surface_nets};
 use nalgebra::{Point3, Vector3};
 use std::fmt::Debug;
@@ -12,7 +12,7 @@ impl<S: Clone + Debug + Send + Sync> CSG<S> {
     /// Return a CSG created by meshing a signed distance field within a bounding box
     ///
     /// ```
-    /// # use csgrs::{csg::CSG, float_types::Real};
+    /// # use csgrs::{csg::CSG, Real};
     /// # use nalgebra::Point3;
     /// // Example SDF for a sphere of radius 1.5 centered at (0,0,0)
     /// let my_sdf = |p: &Point3<Real>| p.coords.norm() - 1.5;

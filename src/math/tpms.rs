@@ -2,7 +2,7 @@
 //! signed‑distance mesher in `sdf.rs`.
 
 use crate::csg::CSG;
-use crate::float_types::Real;
+use crate::core::float_types::Real;
 use nalgebra::Point3;
 use std::fmt::Debug;
 

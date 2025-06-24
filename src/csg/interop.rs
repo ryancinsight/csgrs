@@ -1,5 +1,5 @@
 use super::CSG;
-use crate::float_types::{
+use crate::core::float_types::{
     parry3d::shape::{SharedShape, TriMesh},
     rapier3d::prelude::*,
     Real,

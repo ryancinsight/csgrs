@@ -4,9 +4,9 @@
 //! Unless stated otherwise, all tolerances are governed by
 //! `float_types::EPSILON`.
 
-use crate::float_types::{EPSILON, Real};
-use crate::polygon::Polygon;
-use crate::vertex::Vertex;
+use crate::core::float_types::{EPSILON, Real};
+use super::Polygon;
+use crate::geometry::Vertex;
 use nalgebra::{Isometry3, Matrix4, Point3, Rotation3, Translation3, Vector3};
 use robust::{Coord3D, orient3d};
 
@@ -55,16 +55,16 @@ impl Plane {
         //------------------------------------------------------------------
         // 1.  longest chord (i0,i1)
         //------------------------------------------------------------------
-        let (mut i0, mut i1, mut max_d2) =
-            (0, 1, (vertices[0].pos - vertices[1].pos).norm_squared());
-        for i in 0..n {
-            for j in (i + 1)..n {
+        let Some((i0, i1, _)) = (0..n)
+            .flat_map(|i| (i + 1..n).map(move |j| (i, j)))
+            .map(|(i, j)| {
                 let d2 = (vertices[i].pos - vertices[j].pos).norm_squared();
-                if d2 > max_d2 {
-                    (i0, i1, max_d2) = (i, j, d2);
-                }
-            }
-        }
+                (i, j, d2)
+            })
+            .max_by(|a, b| a.2.total_cmp(&b.2))
+        else {
+            return reference_plane;
+        };
 
         let p0 = vertices[i0].pos;
         let p1 = vertices[i1].pos;
@@ -76,23 +76,23 @@ impl Plane {
         //------------------------------------------------------------------
         // 2.  vertex farthest from the line  p0-p1  → i2
         //------------------------------------------------------------------
-        let mut i2 = None;
-        let mut max_area2 = 0.0;
-        for (idx, v) in vertices.iter().enumerate() {
-            if idx == i0 || idx == i1 {
-                continue;
-            }
-            let a2 = (v.pos - p0).cross(&dir).norm_squared(); // ∝ area²
-            if a2 > max_area2 {
-                max_area2 = a2;
-                i2 = Some(idx);
-            }
-        }
-        let i2 = match i2 {
-            Some(k) if max_area2 > EPSILON * EPSILON => k,
-            _ => {
-                return reference_plane;
-            }, // all vertices collinear
+        let Some((i2, max_area2)) = vertices
+            .iter()
+            .enumerate()
+            .filter(|(idx, _)| *idx != i0 && *idx != i1)
+            .map(|(idx, v)| {
+                let a2 = (v.pos - p0).cross(&dir).norm_squared(); // ∝ area²
+                (idx, a2)
+            })
+            .max_by(|a, b| a.1.total_cmp(&b.1))
+        else {
+            return reference_plane;
+        };
+
+        let i2 = if max_area2 > EPSILON * EPSILON {
+            i2
+        } else {
+            return reference_plane; // all vertices collinear
         };
         let p2 = vertices[i2].pos;
 
@@ -106,13 +106,12 @@ impl Plane {
         };
 
         // Construct the reference normal for the original polygon using Newell's Method.
-        let mut reference_normal = Vector3::zeros();
-
-        // This computes the normal vector, with a magnitude of twice the area of the polygon.
-        for i in 0..vertices.len() {
-            reference_normal += (vertices[i].pos - Point3::origin())
-                .cross(&(vertices[(i + 1) % vertices.len()].pos - Point3::origin()));
-        }
+        let reference_normal = vertices
+            .iter()
+            .zip(vertices.iter().cycle().skip(1))
+            .fold(Vector3::zeros(), |acc, (curr, next)| {
+                acc + (curr.pos - Point3::origin()).cross(&(next.pos - Point3::origin()))
+            });
 
         if plane_hq.normal().dot(&reference_normal) < 0.0 {
             plane_hq.flip(); // flip in-place to agree with winding
@@ -238,13 +237,12 @@ impl Plane {
 
         let normal = self.normal();
 
-        let mut types = Vec::with_capacity(polygon.vertices.len());
-        let mut polygon_type: i8 = 0;
-        for vertex in &polygon.vertices {
-            let vertex_type = self.orient_point(&vertex.pos);
-            types.push(vertex_type);
-            polygon_type |= vertex_type; // bitwise OR vertex types to figure polygon type
-        }
+        let types: Vec<i8> = polygon
+            .vertices
+            .iter()
+            .map(|v| self.orient_point(&v.pos))
+            .collect();
+        let polygon_type = types.iter().fold(0, |acc, &t| acc | t);
 
         // -----------------------------------------------------------------
         // 2.  dispatch the easy cases
@@ -316,7 +314,7 @@ impl Plane {
 
     /// Returns (T, T_inv), where:
     /// - `T`   maps a point on this plane into XY plane (z=0)
-    ///   with the plane’s normal going to +Z,
+    ///   with the plane's normal going to +Z,
     /// - `T_inv` is the inverse transform, mapping back.
     pub fn to_xy_transform(&self) -> (Matrix4<Real>, Matrix4<Real>) {
         // Normal
@@ -335,7 +333,7 @@ impl Plane {
             .unwrap_or_else(Rotation3::identity);
         let iso_rot = Isometry3::from_parts(Translation3::identity(), rot.into());
 
-        // We want to translate so that the plane’s reference point
+        // We want to translate so that the plane's reference point
         //    (some point p0 with n·p0 = w) lands at z=0 in the new coords.
         // p0 = (plane.w / (n·n)) * n
         let denom = n.dot(&n);

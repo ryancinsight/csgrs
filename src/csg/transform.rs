@@ -1,6 +1,6 @@
 use super::CSG;
-use crate::float_types::{EPSILON, Real};
-use crate::plane::Plane;
+use crate::core::float_types::{EPSILON, Real};
+use crate::geometry::Plane;
 use geo::{AffineOps, AffineTransform};
 use nalgebra::{Matrix3, Matrix4, Point3, Rotation3, Translation3, Vector3};
 use std::fmt::Debug;

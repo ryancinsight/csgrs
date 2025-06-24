@@ -1,5 +1,5 @@
 use super::CSG;
-use crate::float_types::Real;
+use crate::core::float_types::Real;
 use nalgebra;
 use std::fmt::Debug;
 

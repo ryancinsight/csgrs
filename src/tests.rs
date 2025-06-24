@@ -1,9 +1,9 @@
 use crate::csg::bsp::Node;
 use crate::csg::CSG;
-use crate::float_types::{EPSILON, FRAC_PI_2, Real};
-use crate::plane::Plane;
-use crate::polygon::Polygon;
-use crate::vertex::Vertex;
+use crate::core::float_types::{EPSILON, FRAC_PI_2, Real};
+use crate::geometry::Plane;
+use crate::geometry::Polygon;
+use crate::geometry::Vertex;
 use nalgebra::{Point3, Vector3};
 
 // --------------------------------------------------------
@@ -355,7 +355,7 @@ fn test_node_new_and_build() {
         ],
         None,
     );
-    let node: Node<()> = Node::new(&[p.clone()]);
+    let node: Node<()> = Node::from_polygons(&[p.clone()]);
     // The node should have built a tree with plane = p.plane, polygons = [p], no front/back children
     assert!(node.plane.is_some());
     assert_eq!(node.polygons.len(), 1);
@@ -373,7 +373,7 @@ fn test_node_invert() {
         ],
         None,
     );
-    let mut node: Node<()> = Node::new(&[p.clone()]);
+    let mut node: Node<()> = Node::from_polygons(&[p.clone()]);
     let original_count = node.polygons.len();
     let original_normal = node.plane.as_ref().unwrap().normal();
     node.invert();
@@ -460,7 +460,7 @@ fn test_node_clip_to() {
         ],
         None,
     );
-    let mut node_a: Node<()> = Node::new(&[poly]);
+    let mut node_a: Node<()> = Node::from_polygons(&[poly]);
     // Another polygon that fully encloses the above
     let big_poly: Polygon<()> = Polygon::new(
         vec![
@@ -471,7 +471,7 @@ fn test_node_clip_to() {
         ],
         None,
     );
-    let node_b: Node<()> = Node::new(&[big_poly]);
+    let node_b: Node<()> = Node::from_polygons(&[big_poly]);
     node_a.clip_to(&node_b);
     // We expect nodeA's polygon to be present
     let all_a = node_a.all_polygons();
@@ -498,7 +498,7 @@ fn test_node_all_polygons() {
         None,
     );
 
-    let node: Node<()> = Node::new(&[poly1.clone(), poly2.clone()]);
+    let node: Node<()> = Node::from_polygons(&[poly1.clone(), poly2.clone()]);
     let all_polys = node.all_polygons();
     // We expect to retrieve both polygons
     assert_eq!(all_polys.len(), 2);
@@ -968,7 +968,7 @@ fn test_csg_mass_properties() {
 
 #[test]
 fn test_csg_to_rigid_body() {
-    use crate::float_types::rapier3d::prelude::*;
+    use crate::core::float_types::rapier3d::prelude::*;
     let cube: CSG<()> = CSG::cube(2.0, None);
     let mut rb_set = RigidBodySet::new();
     let mut co_set = ColliderSet::new();

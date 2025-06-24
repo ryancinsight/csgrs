@@ -10,9 +10,9 @@
 #![cfg_attr(doc, doc = doc_image_embed::embed_image!("ConvexHull demo image", "docs/convex_hull_nobackground.png"))]
 
 use crate::csg::CSG;
-use crate::float_types::Real;
-use crate::polygon::Polygon;
-use crate::vertex::Vertex;
+use crate::core::float_types::Real;
+use crate::geometry::Polygon;
+use crate::geometry::Vertex;
 use chull::ConvexHullWrapper;
 use nalgebra::{Point3, Vector3};
 use std::fmt::Debug;
@@ -21,14 +21,16 @@ impl<S: Clone + Debug + Send + Sync> CSG<S> {
     /// Compute the [convex hull](https://en.wikipedia.org/wiki/Convex_hull) of all vertices in this CSG.
     pub fn convex_hull(&self) -> CSG<S> {
         // Gather all (x, y, z) coordinates from the polygons
-        let points: Vec<Vec<Real>> = self
+        let points: Vec<Point3<Real>> = self
             .polygons
             .iter()
-            .flat_map(|poly| poly.vertices.iter().map(|v| vec![v.pos.x, v.pos.y, v.pos.z]))
+            .flat_map(|poly| poly.vertices.iter().map(|v| v.pos))
             .collect();
 
+        let points_for_hull: Vec<Vec<Real>> = points.iter().map(|p| vec![p.x, p.y, p.z]).collect();
+
         // Attempt to compute the convex hull using the robust wrapper
-        let hull = match ConvexHullWrapper::try_new(&points, None) {
+        let hull = match ConvexHullWrapper::try_new(&points_for_hull, None) {
             Ok(h) => h,
             Err(_) => {
                 // Fallback to an empty CSG if hull generation fails
@@ -77,14 +79,15 @@ impl<S: Clone + Debug + Send + Sync> CSG<S> {
         }
 
         // For Minkowski, add every point in A to every point in B
-        let sum_points: Vec<_> = verts_a
+        let sum_points: Vec<Point3<Real>> = verts_a
             .iter()
             .flat_map(|a| verts_b.iter().map(move |b| a + b.coords))
-            .map(|v| vec![v.x, v.y, v.z])
             .collect();
 
+        let points_for_hull: Vec<Vec<Real>> = sum_points.iter().map(|p| vec![p.x, p.y, p.z]).collect();
+
         // Compute the hull of these Minkowski-sum points
-        let hull = ConvexHullWrapper::try_new(&sum_points, None)
+        let hull = ConvexHullWrapper::try_new(&points_for_hull, None)
             .expect("Failed to compute Minkowski sum hull");
         let (verts, indices) = hull.vertices_indices();
 

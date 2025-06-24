@@ -1,8 +1,8 @@
 use crate::csg::bsp::Node;
 use crate::csg::CSG;
-use crate::float_types::{EPSILON, Real};
-use crate::plane::Plane;
-use crate::vertex::Vertex;
+use crate::core::float_types::{EPSILON, Real};
+use crate::geometry::Plane;
+use crate::geometry::Vertex;
 use geo::{
     BooleanOps, Geometry, GeometryCollection, LineString, MultiPolygon, Orient,
     Polygon as GeoPolygon, coord, orient::Direction,
@@ -93,7 +93,7 @@ impl<S: Clone + Debug + Send + Sync> CSG<S> {
     /// # Example
     /// ```
     /// use csgrs::CSG;
-    /// use csgrs::plane::Plane;
+    /// use csgrs::geometry::Plane;
     /// use nalgebra::Vector3;
     /// let cylinder: CSG<()> = CSG::cylinder(1.0, 2.0, 32, None);
     /// let plane_z0 = Plane::from_normal(Vector3::z(), 0.0);
@@ -104,7 +104,7 @@ impl<S: Clone + Debug + Send + Sync> CSG<S> {
     /// ```
     pub fn slice(&self, plane: Plane) -> CSG<S> {
         // Build a BSP from all of our polygons:
-        let node = Node::new(&self.polygons.clone());
+        let node = Node::from_polygons(&self.polygons.clone());
 
         // Ask the BSP for coplanar polygons + intersection edges:
         let (coplanar_polys, intersection_edges) = node.slice(&plane);

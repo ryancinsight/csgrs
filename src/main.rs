@@ -3,8 +3,8 @@
 // Minimal example of each function of csgrs (which is now generic over the shared-data type S).
 // Here, we do not use any shared data, so we'll bind the generic S to ().
 
-use csgrs::float_types::Real;
-use csgrs::plane::Plane;
+use csgrs::Real;
+use csgrs::geometry::Plane;
 use nalgebra::{Point3, Vector3};
 use std::fs;
 
@@ -12,7 +12,7 @@ use std::fs;
 use image::{GrayImage, ImageBuffer};
 
 #[cfg(feature = "metaballs")]
-use csgrs::metaballs::MetaBall;
+use csgrs::math::metaballs::MetaBall;
 
 // A type alias for convenience: no shared data, i.e. S = ()
 type CSG = csgrs::csg::CSG<()>;

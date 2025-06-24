@@ -1,4 +1,4 @@
-use crate::float_types::Real;
+use crate::core::float_types::Real;
 use nalgebra::{Point3, Vector3};
 
 /// A vertex of a polygon, holding position and normal.

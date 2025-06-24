@@ -1,7 +1,7 @@
 use super::CSG;
 use crate::csg::bsp::Node;
-use crate::float_types::parry3d::bounding_volume::{Aabb, BoundingVolume};
-use crate::polygon::Polygon;
+use crate::core::float_types::parry3d::bounding_volume::{Aabb, BoundingVolume};
+use crate::geometry::Polygon;
 use geo::{BooleanOps, Geometry, GeometryCollection, Orient, orient::Direction};
 use std::fmt::Debug;
 use std::sync::OnceLock;
@@ -45,8 +45,8 @@ impl<S: Clone + Debug + Send + Sync> CSG<S> {
         let (b_clip, b_passthru) =
             Self::partition_polys(&other.polygons, &self.bounding_box());
 
-        let mut a = Node::new(&a_clip);
-        let mut b = Node::new(&b_clip);
+        let mut a = Node::from_polygons(&a_clip);
+        let mut b = Node::from_polygons(&b_clip);
 
         a.clip_to(&b);
         b.clip_to(&a);
@@ -126,8 +126,8 @@ impl<S: Clone + Debug + Send + Sync> CSG<S> {
         let (b_clip, _b_passthru) =
             Self::partition_polys(&other.polygons, &self.bounding_box());
 
-        let mut a = Node::new(&a_clip);
-        let mut b = Node::new(&b_clip);
+        let mut a = Node::from_polygons(&a_clip);
+        let mut b = Node::from_polygons(&b_clip);
 
         a.invert();
         a.clip_to(&b);
@@ -191,8 +191,14 @@ impl<S: Clone + Debug + Send + Sync> CSG<S> {
     /// ```
     pub fn intersection(&self, other: &CSG<S>) -> CSG<S> {
         // 3D intersection:
-        let mut a = Node::new(&self.polygons);
-        let mut b = Node::new(&other.polygons);
+        // avoid splitting obvious non‑intersecting faces
+        let (a_clip, _a_passthru) =
+            Self::partition_polys(&self.polygons, &other.bounding_box());
+        let (b_clip, _b_passthru) =
+            Self::partition_polys(&other.polygons, &self.bounding_box());
+
+        let mut a = Node::from_polygons(&a_clip);
+        let mut b = Node::from_polygons(&b_clip);
 
         a.invert();
         b.clip_to(&a);

@@ -1,7 +1,7 @@
 use crate::csg::CSG;
-use crate::float_types::{EPSILON, Real};
-use crate::polygon::Polygon;
-use crate::vertex::Vertex;
+use crate::core::float_types::{EPSILON, Real};
+use crate::geometry::Polygon;
+use crate::geometry::Vertex;
 use image::GrayImage;
 use nalgebra::{Point3, Vector3};
 use std::fmt::Debug;

@@ -1,7 +1,7 @@
-use crate::float_types::parry3d::bounding_volume::Aabb;
-use crate::float_types::{PI, Real};
-use crate::plane::Plane;
-use crate::vertex::Vertex;
+use crate::core::float_types::parry3d::bounding_volume::Aabb;
+use crate::core::float_types::{PI, Real};
+use crate::geometry::Plane;
+use crate::geometry::Vertex;
 use geo::{LineString, Polygon as GeoPolygon, coord};
 use nalgebra::{Point2, Point3, Vector3};
 use std::sync::OnceLock;

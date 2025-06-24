@@ -1,6 +1,6 @@
-use crate::float_types::Real;
-use crate::polygon::Polygon;
-use crate::{CSG, Vertex};
+use crate::core::float_types::Real;
+use crate::geometry::Polygon;
+use crate::{CSG, geometry::Vertex};
 
 use nalgebra::{Point3, Vector3};
 use std::error::Error;
@@ -81,7 +81,7 @@ impl<S: Clone + Debug + Send + Sync> CSG<S> {
 
                     for i in 0..segments {
                         let theta =
-                            2.0 * crate::float_types::PI * (i as Real) / (segments as Real);
+                            2.0 * crate::core::float_types::PI * (i as Real) / (segments as Real);
                         let x = center.x as Real + radius * theta.cos();
                         let y = center.y as Real + radius * theta.sin();
                         let z = center.z as Real;

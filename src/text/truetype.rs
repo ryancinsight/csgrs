@@ -1,7 +1,7 @@
 //! Create `CSG`s using ttf fonts
 
 use crate::csg::CSG;
-use crate::float_types::Real;
+use crate::core::float_types::Real;
 use geo::{
     Area, Geometry, GeometryCollection, LineString, Orient, Polygon as GeoPolygon,
     orient::Direction,

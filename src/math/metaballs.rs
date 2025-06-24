@@ -1,9 +1,9 @@
 //! Implementation of [metaballs](https://en.wikipedia.org/wiki/Metaballs)
 
 use crate::csg::CSG;
-use crate::float_types::{EPSILON, Real};
-use crate::polygon::Polygon;
-use crate::vertex::Vertex;
+use crate::core::float_types::{EPSILON, Real};
+use crate::geometry::Polygon;
+use crate::geometry::Vertex;
 use fast_surface_nets::{SurfaceNetsBuffer, surface_nets};
 use geo::{
     Coord, CoordsIter, Geometry, GeometryCollection, LineString, Polygon as GeoPolygon, coord,
@@ -28,7 +28,7 @@ impl MetaBall {
         Self { center, radius }
     }
 
-    /// “Influence” function used by the scalar field for metaballs
+    /// "Influence" function used by the scalar field for metaballs
     pub fn influence(&self, p: &Point3<Real>) -> Real {
         let dist_sq = (p - self.center).norm_squared() + EPSILON;
         self.radius * self.radius / dist_sq
@@ -37,12 +37,7 @@ impl MetaBall {
 
 /// Summation of influences from multiple metaballs.
 fn scalar_field_metaballs(balls: &[MetaBall], p: &Point3<Real>) -> Real {
-    let mut value = 0.0;
-    for ball in balls {
-        value += ball.influence(p);
-    }
-
-    value
+    balls.iter().map(|ball| ball.influence(p)).sum()
 }
 
 // helper – quantise to avoid FP noise
@@ -150,7 +145,7 @@ impl<S: Clone + Debug + Send + Sync> CSG<S> {
         let dx = (max_x - min_x) / (nx as Real - 1.0);
         let dy = (max_y - min_y) / (ny as Real - 1.0);
 
-        // 2) Fill a grid with the summed “influence” minus iso_value
+        // 2) Fill a grid with the summed "influence" minus iso_value
         fn scalar_field(balls: &[(nalgebra::Point2<Real>, Real)], x: Real, y: Real) -> Real {
             let mut v = 0.0;
             for (c, r) in balls {
@@ -273,7 +268,7 @@ impl<S: Clone + Debug + Send + Sync> CSG<S> {
     /// - `balls`: slice of metaball definitions (center + radius).
     /// - `resolution`: (nx, ny, nz) defines how many steps along x, y, z.
     /// - `iso_value`: threshold at which the isosurface is extracted.
-    /// - `padding`: extra margin around the bounding region (e.g. 0.5) so the surface doesn’t get truncated.
+    /// - `padding`: extra margin around the bounding region (e.g. 0.5) so the surface doesn't get truncated.
     pub fn metaballs(
         balls: &[MetaBall],
         resolution: (usize, usize, usize),
@@ -286,33 +281,22 @@ impl<S: Clone + Debug + Send + Sync> CSG<S> {
         }
 
         // Determine bounding box of all metaballs (plus padding).
-        let mut min_pt = Point3::new(Real::MAX, Real::MAX, Real::MAX);
-        let mut max_pt = Point3::new(-Real::MAX, -Real::MAX, -Real::MAX);
-
-        for mb in balls {
-            let c = &mb.center;
-            let r = mb.radius + padding;
-
-            if c.x - r < min_pt.x {
-                min_pt.x = c.x - r;
-            }
-            if c.y - r < min_pt.y {
-                min_pt.y = c.y - r;
-            }
-            if c.z - r < min_pt.z {
-                min_pt.z = c.z - r;
-            }
-
-            if c.x + r > max_pt.x {
-                max_pt.x = c.x + r;
-            }
-            if c.y + r > max_pt.y {
-                max_pt.y = c.y + r;
-            }
-            if c.z + r > max_pt.z {
-                max_pt.z = c.z + r;
-            }
-        }
+        let (min_pt, max_pt) = balls.iter().fold(
+            (
+                Point3::new(Real::MAX, Real::MAX, Real::MAX),
+                Point3::new(-Real::MAX, -Real::MAX, -Real::MAX),
+            ),
+            |(mut min_p, mut max_p), mb| {
+                let r = mb.radius + padding;
+                min_p.x = min_p.x.min(mb.center.x - r);
+                min_p.y = min_p.y.min(mb.center.y - r);
+                min_p.z = min_p.z.min(mb.center.z - r);
+                max_p.x = max_p.x.max(mb.center.x + r);
+                max_p.y = max_p.y.max(mb.center.y + r);
+                max_p.z = max_p.z.max(mb.center.z + r);
+                (min_p, max_p)
+            },
+        );
 
         // Resolution for X, Y, Z
         let nx = resolution.0.max(2) as u32;

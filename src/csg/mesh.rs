@@ -1,5 +1,5 @@
 use super::CSG;
-use crate::polygon::Polygon;
+use crate::geometry::Polygon;
 use std::fmt::Debug;
 
 #[cfg(feature = "parallel")]
@@ -12,6 +12,7 @@ impl<S: Clone + Debug + Send + Sync> CSG<S> {
     /// ## Example
     /// ```
     /// use csgrs::CSG;
+    /// use core::num::NonZeroU32;
     /// let mut cube: CSG<()> = CSG::cube(2.0, None);
     /// // subdivide_triangles(1) => each polygon (quad) is triangulated => 2 triangles => each tri subdivides => 4
     /// // So each face with 4 vertices => 2 triangles => each becomes 4 => total 8 per face => 6 faces => 48
@@ -21,15 +22,6 @@ impl<S: Clone + Debug + Send + Sync> CSG<S> {
     /// let mut cube: CSG<()> = CSG::cube(2.0, None);
     /// cube.subdivide_triangles_mut(2.try_into().expect("not zero"));
     /// assert_eq!(cube.polygons.len(), 192);
-    /// ```
-    /// # Examples
-    ///
-    /// ```ignore
-    /// use csgrs::CSG;
-    /// use core::num::NonZeroU32;
-    /// let mut cube: CSG<()> = CSG::cube(2.0, None);
-    /// cube.subdivide_triangles_mut(NonZeroU32::new(1).unwrap());
-    /// assert!(cube.polygons.len() > 6);
     /// ```
     pub fn subdivide_triangles_mut(&mut self, levels: core::num::NonZeroU32) {
         #[cfg(feature = "parallel")]
