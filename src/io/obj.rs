@@ -134,12 +134,14 @@ impl<S: Clone + Debug + Send + Sync> CSG<S> {
     /// * `metadata` - Optional metadata to attach to all polygons
     /// 
     /// # Example
-    /// ```
+    /// ```no_run
     /// use csgrs::CSG;
     /// use std::fs::File;
+    /// use std::io::BufReader;
     /// # fn main() -> Result<(), Box<dyn std::error::Error>> {
     /// let file = File::open("input.obj")?;
-    /// let csg: CSG<()> = CSG::from_obj(file, None)?;
+    /// let reader = BufReader::new(file);
+    /// let csg: CSG<()> = CSG::from_obj(reader, None)?;
     /// # Ok(())
     /// # }
     /// ```

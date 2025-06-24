@@ -24,9 +24,31 @@ impl Vertex {
         self.normal = -self.normal;
     }
 
-    /// Return the barycentric linear interpolation between `self` (`t = 0`) and `other` (`t = 1`).
+    /// **Mathematical Foundation: Barycentric Linear Interpolation**
     ///
-    /// Normals are linearlly interpolated as well.
+    /// Compute the barycentric linear interpolation between `self` (`t = 0`) and `other` (`t = 1`).
+    /// This implements the fundamental linear interpolation formula:
+    ///
+    /// ## **Interpolation Formula**
+    /// For parameter t ∈ [0,1]:
+    /// - **Position**: p(t) = (1-t)·p₀ + t·p₁ = p₀ + t·(p₁ - p₀)
+    /// - **Normal**: n(t) = (1-t)·n₀ + t·n₁ = n₀ + t·(n₁ - n₀)
+    ///
+    /// ## **Mathematical Properties**
+    /// - **Affine Combination**: Coefficients sum to 1: (1-t) + t = 1
+    /// - **Endpoint Preservation**: p(0) = p₀, p(1) = p₁
+    /// - **Linearity**: Second derivatives are zero (straight line in parameter space)
+    /// - **Convexity**: Result lies on line segment between endpoints
+    ///
+    /// ## **Geometric Interpretation**
+    /// The interpolated vertex represents a point on the edge connecting the two vertices,
+    /// with both position and normal vectors smoothly blended. This is fundamental for:
+    /// - **Polygon Splitting**: Creating intersection vertices during BSP operations
+    /// - **Triangle Subdivision**: Generating midpoints for mesh refinement
+    /// - **Smooth Shading**: Interpolating normals across polygon edges
+    ///
+    /// **Note**: Normals are linearly interpolated (not spherically), which is appropriate
+    /// for most geometric operations but may require renormalization for lighting calculations.
     pub fn interpolate(&self, other: &Vertex, t: Real) -> Vertex {
         // For positions (Point3): p(t) = p0 + t * (p1 - p0)
         let new_pos = self.pos + (other.pos - self.pos) * t;

@@ -1,8 +1,70 @@
-//! Utilities for working with planes in 3‑space including robust
-//! orientation tests, point classification and polygon splitting.
+//! **Mathematical Foundations for 3D Plane Operations**
 //!
-//! Unless stated otherwise, all tolerances are governed by
-//! `float_types::EPSILON`.
+//! This module implements robust geometric operations for planes in 3-space based on
+//! established computational geometry principles:
+//!
+//! ## **Theoretical Foundation**
+//!
+//! ### **Plane Representation**
+//! A plane π in 3D space can be represented as:
+//! - **Implicit form**: ax + by + cz + d = 0, where (a,b,c)ᵀ is the normal vector
+//! - **Point-normal form**: n⃗·(p⃗ - p₀⃗) = 0, where n⃗ is the unit normal and p₀⃗ is a point on the plane
+//! - **Three-point form**: Defined by three non-collinear points A, B, C
+//!
+//! ### **Orientation Testing Algorithms**
+//! 
+//! **Robust Geometric Predicates**: This implementation uses the `robust` crate's
+//! `orient3d` predicate, which implements Shewchuk's exact arithmetic methods for
+//! robust orientation testing. The predicate computes the sign of the determinant:
+//!
+//! ```text
+//! |ax  ay  az  1|
+//! |bx  by  bz  1|
+//! |cx  cy  cz  1|
+//! |dx  dy  dz  1|
+//! ```
+//!
+//! This determines whether point D lies above, below, or on the plane defined by A, B, C.
+//!
+//! ### **Polygon Splitting Algorithm**
+//! 
+//! **Sutherland-Hodgman Clipping**: The `split_polygon` function implements a 3D
+//! generalization of the Sutherland-Hodgman polygon clipping algorithm:
+//!
+//! 1. **Classification**: Each vertex is classified as FRONT, BACK, COPLANAR, or SPANNING
+//! 2. **Edge Processing**: For each edge (vᵢ, vⱼ):
+//!    - If both vertices are on the same side, add appropriate vertex
+//!    - If edge spans the plane, compute intersection and add to both output lists
+//! 3. **Intersection Computation**: For spanning edges, solve for intersection parameter t:
+//!    ```text
+//!    t = (d - n⃗·vᵢ) / (n⃗·(vⱼ - vᵢ))
+//!    ```
+//!    where d is the plane's signed distance from origin.
+//!
+//! ### **Coordinate System Transformations**
+//! 
+//! **Plane-to-XY Projection**: The `to_xy_transform` method computes an orthonormal
+//! transformation that maps the plane to the XY-plane (z=0):
+//!
+//! 1. **Rotation**: Find rotation R such that plane normal n⃗ → (0,0,1)ᵀ
+//! 2. **Translation**: Translate so plane passes through origin
+//! 3. **Combined Transform**: T = T₂ · R · T₁
+//!
+//! This enables 2D algorithms to be applied to 3D planar polygons.
+//!
+//! ## **Numerical Stability**
+//!
+//! - **Robust Predicates**: Uses exact arithmetic for orientation tests
+//! - **Epsilon Tolerances**: Governed by `float_types::EPSILON` for floating-point comparisons
+//! - **Degenerate Case Handling**: Proper fallbacks for collinear points and zero-area triangles
+//!
+//! ## **Algorithm Complexity**
+//! 
+//! - **Plane Construction**: O(n²) for optimal triangle selection, O(1) for basic construction
+//! - **Orientation Testing**: O(1) per point with robust predicates
+//! - **Polygon Splitting**: O(n) per polygon, where n is the number of vertices
+//!
+//! Unless stated otherwise, all tolerances are governed by `float_types::EPSILON`.
 
 use crate::core::float_types::{EPSILON, Real};
 use super::Polygon;
@@ -313,9 +375,16 @@ impl Plane {
     }
 
     /// Returns (T, T_inv), where:
-    /// - `T`   maps a point on this plane into XY plane (z=0)
-    ///   with the plane's normal going to +Z,
-    /// - `T_inv` is the inverse transform, mapping back.
+    /// - `T` maps a point on this plane into XY plane (z=0) with the plane's normal going to +Z
+    /// - `T_inv` is the inverse transform, mapping back
+    /// 
+    /// **Mathematical Foundation**: This implements an orthonormal transformation:
+    /// 1. **Rotation Matrix**: R = rotation_between(plane_normal, +Z)
+    /// 2. **Translation**: Translate so plane passes through origin
+    /// 3. **Combined Transform**: T = T₂ · R · T₁
+    /// 
+    /// The transformation preserves distances and angles, enabling 2D algorithms
+    /// to be applied to 3D planar geometry.
     pub fn to_xy_transform(&self) -> (Matrix4<Real>, Matrix4<Real>) {
         // Normal
         let n = self.normal();

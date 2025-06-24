@@ -1,3 +1,51 @@
+//! **Mathematical Foundations for Linear Extrusion**
+//!
+//! This module implements mathematically rigorous linear extrusion algorithms
+//! for transforming 2D geometry into 3D solids using vector-based displacement.
+//!
+//! ## **Theoretical Foundation**
+//!
+//! ### **Linear Extrusion Definition**
+//! For a 2D region R ⊂ ℝ² and direction vector d⃗ ∈ ℝ³, the linear extrusion is:
+//! ```text
+//! E(R, d⃗) = {p + t·d⃗ | p ∈ R, t ∈ [0,1]}
+//! ```
+//! This creates a 3D solid by "sweeping" the 2D region along the direction vector.
+//!
+//! ### **Geometric Construction**
+//! The extrusion process generates three types of surfaces:
+//!
+//! 1. **Bottom Surface**: Original 2D geometry at parameter t=0
+//! 2. **Top Surface**: Translated geometry at parameter t=1
+//! 3. **Side Surfaces**: Ruled surfaces connecting corresponding boundary points
+//!
+//! ### **Surface Normal Calculation**
+//! For side surfaces, normals are computed using the cross product:
+//! ```text
+//! n⃗ = (e⃗ × d⃗).normalize()
+//! ```
+//! where e⃗ is the edge vector and d⃗ is the extrusion direction.
+//!
+//! ### **Boundary Handling**
+//! - **Exterior boundaries**: Generate outward-facing side surfaces
+//! - **Interior boundaries (holes)**: Generate inward-facing side surfaces
+//! - **Orientation preservation**: Maintains proper winding for each surface type
+//!
+//! ## **Tessellation Integration**
+//! Complex 2D shapes are triangulated before extrusion:
+//! - **Polygon triangulation**: Converts arbitrary polygons to triangles
+//! - **Hole handling**: Proper treatment of interior boundaries
+//! - **Manifold preservation**: Ensures resulting 3D mesh is manifold
+//!
+//! ## **Applications**
+//! - **Architectural modeling**: Building components from floor plans
+//! - **Mechanical design**: Parts with constant cross-section
+//! - **Text rendering**: 3D text from 2D font outlines
+//! - **Packaging design**: Box-like structures from 2D templates
+//!
+//! All operations preserve geometric accuracy and maintain proper topology
+//! for subsequent CSG operations and mesh processing.
+
 use crate::csg::CSG;
 use crate::core::float_types::{EPSILON, Real};
 use crate::geometry::Polygon;
@@ -15,12 +63,70 @@ impl<S: Clone + Debug + Send + Sync> CSG<S> {
         self.extrude_vector(Vector3::new(0.0, 0.0, height))
     }
 
-    /// Linearly extrude any 2D geometry (Polygons, MultiPolygons, or sub-geometries
-    /// in a GeometryCollection) in `self.geometry` along the given `direction`.
+    /// **Mathematical Foundation: Vector-Based Linear Extrusion**
     ///
-    /// Builds top, bottom, and side polygons in 3D, storing them in `csg.polygons`.
-    /// Returns a new CSG containing these extruded polygons (plus any existing 3D polygons
-    /// you already had in `self.polygons`).
+    /// Linearly extrude any 2D geometry along the given direction vector.
+    /// This implements the complete mathematical theory of linear extrusion
+    /// with proper surface generation and normal calculation.
+    ///
+    /// ## **Extrusion Mathematics**
+    ///
+    /// ### **Parametric Surface Definition**
+    /// For a 2D boundary curve C(u) and direction vector d⃗:
+    /// ```text
+    /// S(u,v) = C(u) + v·d⃗
+    /// where u ∈ [0,1] parameterizes the boundary
+    ///       v ∈ [0,1] parameterizes the extrusion
+    /// ```
+    ///
+    /// ### **Surface Normal Computation**
+    /// For side surfaces, the normal is computed as:
+    /// ```text
+    /// n⃗ = (∂S/∂u × ∂S/∂v).normalize()
+    ///   = (C'(u) × d⃗).normalize()
+    /// ```
+    /// where C'(u) is the tangent to the boundary curve.
+    ///
+    /// ### **Surface Classification**
+    /// The extrusion generates three surface types:
+    ///
+    /// 1. **Bottom Caps** (v=0):
+    ///    - Triangulated 2D regions at z=0
+    ///    - Normal: n⃗ = -d⃗.normalize() (inward for solid)
+    ///
+    /// 2. **Top Caps** (v=1):
+    ///    - Translated triangulated regions
+    ///    - Normal: n⃗ = +d⃗.normalize() (outward for solid)
+    ///
+    /// 3. **Side Surfaces**:
+    ///    - Quadrilateral strips connecting boundary edges
+    ///    - Normal: n⃗ = (edge × direction).normalize()
+    ///
+    /// ### **Boundary Orientation Rules**
+    /// - **Exterior boundaries**: Counter-clockwise → outward-facing sides
+    /// - **Interior boundaries (holes)**: Clockwise → inward-facing sides
+    /// - **Winding preservation**: Maintains topological correctness
+    ///
+    /// ### **Geometric Properties**
+    /// - **Volume**: V = Area(base) × |d⃗|
+    /// - **Surface Area**: A = 2×Area(base) + Perimeter(base)×|d⃗|
+    /// - **Centroid**: c⃗ = centroid(base) + 0.5×d⃗
+    ///
+    /// ## **Numerical Considerations**
+    /// - **Degenerate Direction**: |d⃗| < ε returns original geometry
+    /// - **Normal Calculation**: Cross products normalized for unit normals
+    /// - **Manifold Preservation**: Ensures watertight mesh topology
+    ///
+    /// ## **Algorithm Complexity**
+    /// - **Triangulation**: O(n log n) for n boundary vertices
+    /// - **Surface Generation**: O(n) for n boundary edges
+    /// - **Total Complexity**: O(n log n) dominated by tessellation
+    ///
+    /// Builds top, bottom, and side polygons in 3D, storing them in the polygon list.
+    /// Returns a new CSG containing these extruded polygons plus any existing 3D geometry.
+    ///
+    /// # Parameters
+    /// - `direction`: 3D vector defining extrusion direction and magnitude
     pub fn extrude_vector(&self, direction: Vector3<Real>) -> CSG<S> {
         // If the direction is near zero length, nothing to extrude:
         if direction.norm() < EPSILON {

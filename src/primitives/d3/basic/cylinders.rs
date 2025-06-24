@@ -1,6 +1,51 @@
-//! Basic 3D cylindrical shapes
+//! **Mathematical Foundations for Cylindrical Geometry**
 //!
-//! This module contains cylinder and frustum generation functions.
+//! This module implements mathematically rigorous generation of cylindrical
+//! and frustum shapes using parametric surface theory and proper handling
+//! of degenerate cases (cones and lines).
+//!
+//! ## **Theoretical Foundation**
+//!
+//! ### **Frustum Parametric Equations**
+//! A frustum (truncated cone) between points P₁ and P₂ with radii r₁ and r₂:
+//! ```text
+//! S(u,v) = P₁ + v(P₂-P₁) + R(v)·[cos(2πu)·x̂ + sin(2πu)·ŷ]
+//! where:
+//! - u ∈ [0,1]: Angular parameter around axis
+//! - v ∈ [0,1]: Linear parameter along axis  
+//! - R(v) = r₁(1-v) + r₂v: Linear radius interpolation
+//! ```
+//!
+//! ### **Coordinate System Construction**
+//! For arbitrary axis direction d⃗ = P₂ - P₁:
+//! 1. **Primary axis**: ẑ = d⃗/|d⃗|
+//! 2. **Perpendicular axes**: Choose x̂ ⊥ ẑ, then ŷ = ẑ × x̂
+//! 3. **Orthonormal basis**: {x̂, ŷ, ẑ} forms right-handed system
+//!
+//! ### **Surface Normal Calculation**
+//! For frustum lateral surfaces, normals are computed using partial derivatives:
+//! ```text
+//! n⃗ = (∂S/∂u × ∂S/∂v).normalize()
+//! ```
+//! For cones, this simplifies to a linear combination of radial and axial components.
+//!
+//! ### **Degenerate Case Handling**
+//! - **Cylinder**: r₁ = r₂ (constant radius)
+//! - **Cone**: r₁ = 0 or r₂ = 0 (apex degeneracy)
+//! - **Line**: r₁ = r₂ = 0 (complete degeneracy)
+//! - **Point**: P₁ = P₂ and r₁ = r₂ = 0 (invalid geometry)
+//!
+//! ### **Cap Generation**
+//! - **Bottom cap**: Triangulated disk at P₁ with radius r₁
+//! - **Top cap**: Triangulated disk at P₂ with radius r₂
+//! - **Orientation**: Normals point outward from solid interior
+//!
+//! ## **Geometric Properties**
+//! - **Volume**: V = (π/3)h(r₁² + r₁r₂ + r₂²) for frustum
+//! - **Lateral Surface Area**: A = π(r₁+r₂)√((r₁-r₂)² + h²)
+//! - **Total Surface Area**: A_total = A_lateral + πr₁² + πr₂²
+//!
+//! All shapes maintain proper topology for CSG operations.
 
 use crate::csg::CSG;
 use crate::core::float_types::{EPSILON, Real, TAU};

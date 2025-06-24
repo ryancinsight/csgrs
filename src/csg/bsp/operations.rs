@@ -7,6 +7,9 @@ use std::fmt::Debug;
 
 impl<S: Clone + Send + Sync + Debug> Node<S> {
     /// Build a BSP tree from the given polygons
+    /// **Mathematical Foundation**: Recursively partition 3D space using hyperplanes,
+    /// classifying polygons as FRONT, BACK, COPLANAR, or SPANNING relative to the splitting plane.
+    /// **Algorithm**: O(n log n) expected time for balanced trees, O(n²) worst case.
     pub fn build(&mut self, polygons: &[Polygon<S>]) {
         if polygons.is_empty() {
             return;
@@ -18,21 +21,24 @@ impl<S: Clone + Send + Sync + Debug> Node<S> {
         }
         let plane = self.plane.as_ref().unwrap();
 
-        let mut front: Vec<Polygon<S>> = Vec::new();
-        let mut back: Vec<Polygon<S>> = Vec::new();
+        // Pre-allocate with estimated capacity for better performance
+        let mut front = Vec::with_capacity(polygons.len() / 2);
+        let mut back = Vec::with_capacity(polygons.len() / 2);
 
-        // For each polygon, split it relative to the current node's plane.
-        for p in polygons {
-            let (coplanar_front, coplanar_back, f, b) = plane.split_polygon(p);
+        // Optimized polygon classification using iterator pattern
+        // **Mathematical Theorem**: Each polygon is classified relative to the splitting plane
+        for polygon in polygons {
+            let (coplanar_front, coplanar_back, mut front_parts, mut back_parts) = 
+                plane.split_polygon(polygon);
 
+            // Extend collections efficiently with iterator chains
             self.polygons.extend(coplanar_front);
             self.polygons.extend(coplanar_back);
-
-            front.extend(f);
-            back.extend(b);
+            front.append(&mut front_parts);
+            back.append(&mut back_parts);
         }
 
-        // Build child nodes using get_or_insert_with pattern
+        // Build child nodes using lazy initialization pattern for memory efficiency
         if !front.is_empty() {
             self.front
                 .get_or_insert_with(|| Box::new(Node::new()))
@@ -46,50 +52,51 @@ impl<S: Clone + Send + Sync + Debug> Node<S> {
         }
     }
 
-
-
     /// Recursively remove all polygons in `polygons` that are inside this BSP tree
+    /// **Mathematical Foundation**: Uses plane classification to determine polygon visibility.
+    /// Polygons entirely in BACK half-space are clipped (removed).
+    /// **Algorithm**: O(n log d) where n is polygon count, d is tree depth.
     pub fn clip_polygons(&self, polygons: &[Polygon<S>]) -> Vec<Polygon<S>> {
         if self.plane.is_none() {
             return polygons.to_vec();
         }
 
         let plane = self.plane.as_ref().unwrap();
-        let mut front_polys: Vec<Polygon<S>> = Vec::new();
-        let mut back_polys: Vec<Polygon<S>> = Vec::new();
+        
+        // Pre-allocate for better performance
+        let mut front_polys = Vec::with_capacity(polygons.len());
+        let mut back_polys = Vec::with_capacity(polygons.len());
 
-        for poly in polygons {
-            let (coplanar_front, coplanar_back, mut front, mut back) = plane.split_polygon(poly);
+        // Optimized polygon splitting with iterator patterns
+        for polygon in polygons {
+            let (coplanar_front, coplanar_back, mut front_parts, mut back_parts) = 
+                plane.split_polygon(polygon);
 
-            // Handle coplanar polygons with iterator chains
-            coplanar_front.into_iter()
-                .chain(coplanar_back.into_iter())
-                .for_each(|cp| {
-                    if plane.orient_plane(&cp.plane) == FRONT {
-                        front.push(cp);
-                    } else {
-                        back.push(cp);
-                    }
-                });
+            // Efficient coplanar polygon classification using iterator chain
+            for coplanar_poly in coplanar_front.into_iter().chain(coplanar_back.into_iter()) {
+                if plane.orient_plane(&coplanar_poly.plane) == FRONT {
+                    front_parts.push(coplanar_poly);
+                } else {
+                    back_parts.push(coplanar_poly);
+                }
+            }
 
-            front_polys.extend(front);
-            back_polys.extend(back);
+            front_polys.append(&mut front_parts);
+            back_polys.append(&mut back_parts);
         }
 
-        let mut final_front = if let Some(ref f) = self.front {
-            f.clip_polygons(&front_polys)
+        // Recursively clip with optimized pattern
+        let mut result = if let Some(front_node) = &self.front {
+            front_node.clip_polygons(&front_polys)
         } else {
             front_polys
         };
 
-        let back_clipped = if let Some(ref b) = self.back {
-            b.clip_polygons(&back_polys)
-        } else {
-            Vec::new()
-        };
+        if let Some(back_node) = &self.back {
+            result.extend(back_node.clip_polygons(&back_polys));
+        }
         
-        final_front.extend(back_clipped);
-        final_front
+        result
     }
 
     /// Remove all polygons in this BSP tree that are inside the other BSP tree

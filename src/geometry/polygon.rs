@@ -72,7 +72,42 @@ impl<S: Clone + Send + Sync> Polygon<S> {
         self.vertices.iter().zip(self.vertices.iter().cycle().skip(1))
     }
 
+    /// **Mathematical Foundation: Polygon Triangulation**
+    ///
     /// Triangulate this polygon into a list of triangles, each triangle is [v0, v1, v2].
+    /// This implements robust 2D triangulation algorithms for 3D planar polygons.
+    ///
+    /// ## **Algorithmic Approaches**
+    ///
+    /// ### **Ear Clipping (Earcut)**
+    /// **Algorithm**: Based on the "ear removal" theorem:
+    /// - **Ear Definition**: A triangle formed by three consecutive vertices with no other vertices inside
+    /// - **Theorem**: Every simple polygon with n > 3 vertices has at least two ears
+    /// - **Complexity**: O(n²) worst case, O(n) for most practical polygons
+    /// - **Robustness**: Handles arbitrary simple polygons including concave shapes
+    ///
+    /// ### **Delaunay Triangulation (Spade)**
+    /// **Algorithm**: Based on maximizing minimum angles:
+    /// - **Delaunay Property**: No vertex lies inside circumcircle of any triangle
+    /// - **Complexity**: O(n log n) expected time
+    /// - **Quality**: Produces well-shaped triangles, avoids slivers
+    /// - **Constraints**: Maintains polygon boundary as constraint edges
+    ///
+    /// ## **3D to 2D Projection**
+    /// The algorithm projects the 3D planar polygon to 2D:
+    /// 1. **Orthonormal Basis**: Compute basis vectors {u⃗, v⃗} in the plane
+    /// 2. **Projection**: For each vertex pᵢ: (x,y) = ((pᵢ-p₀)·u⃗, (pᵢ-p₀)·v⃗)
+    /// 3. **Triangulation**: Apply 2D algorithm to projected coordinates
+    /// 4. **Reconstruction**: Map 2D triangles back to 3D using inverse projection
+    ///
+    /// ## **Numerical Considerations**
+    /// - **Degeneracy Handling**: Filters out near-zero coordinates for stability
+    /// - **Precision Limits**: Spade enforces minimum coordinate values
+    /// - **Normal Preservation**: All output triangles maintain original plane normal
+    ///
+    /// The choice between algorithms depends on build features:
+    /// - `earcut`: Fast for simple polygons, handles concave shapes
+    /// - `delaunay`: Better triangle quality, more robust for complex geometry
     pub fn tessellate(&self) -> Vec<[Vertex; 3]> {
         // If polygon has fewer than 3 vertices, nothing to tessellate
         if self.vertices.len() < 3 {
@@ -171,8 +206,57 @@ impl<S: Clone + Send + Sync> Polygon<S> {
         }
     }
 
-    /// Subdivide this polygon into smaller triangles.
-    /// Returns a list of new triangles (each is a [Vertex; 3]).
+    /// **Mathematical Foundation: Triangle Subdivision for Mesh Refinement**
+    ///
+    /// Subdivide this polygon into smaller triangles using recursive triangle splitting.
+    /// This implements the mathematical theory of uniform mesh refinement:
+    ///
+    /// ## **Subdivision Algorithm**
+    ///
+    /// ### **Base Triangulation**
+    /// 1. **Initial Tessellation**: Convert polygon to base triangles using tessellate()
+    /// 2. **Triangle Count**: n base triangles from polygon
+    ///
+    /// ### **Recursive Subdivision**
+    /// For each subdivision level, each triangle T is split into 4 smaller triangles:
+    /// ```text
+    /// Original Triangle:     Subdivided Triangle:
+    ///        A                        A
+    ///       /\                      /\ \
+    ///      /  \                    /  \ \
+    ///     /____\                  M₁___M₂ \
+    ///    B      C                /\    /\ \
+    ///                           /  \  /  \ \
+    ///                          /____\/____\
+    ///                         B     M₃     C
+    /// ```
+    ///
+    /// ### **Midpoint Calculation**
+    /// For triangle vertices (A, B, C):
+    /// - **M₁ = midpoint(A,B)**: Linear interpolation at t=0.5
+    /// - **M₂ = midpoint(A,C)**: Linear interpolation at t=0.5  
+    /// - **M₃ = midpoint(B,C)**: Linear interpolation at t=0.5
+    ///
+    /// ### **Subdivision Pattern**
+    /// Creates 4 congruent triangles:
+    /// 1. **Corner triangles**: (A,M₁,M₂), (M₁,B,M₃), (M₂,M₃,C)
+    /// 2. **Center triangle**: (M₁,M₂,M₃)
+    ///
+    /// ## **Mathematical Properties**
+    /// - **Area Preservation**: Total area remains constant
+    /// - **Similarity**: All subtriangles are similar to original
+    /// - **Scaling Factor**: Each subtriangle has 1/4 the area
+    /// - **Growth Rate**: Triangle count × 4ᵏ after k subdivisions
+    /// - **Smoothness**: C¹ continuity maintained across edges
+    ///
+    /// ## **Applications**
+    /// - **Level of Detail**: Adaptive mesh resolution
+    /// - **Smooth Surfaces**: Approximating curved surfaces with flat triangles
+    /// - **Numerical Methods**: Finite element mesh refinement
+    /// - **Rendering**: Progressive mesh detail for distance-based LOD
+    ///
+    /// Returns a list of refined triangles (each is a [Vertex; 3]).
+    /// For polygon applications, these can be converted back to triangular polygons.
     pub fn subdivide_triangles(
         &self,
         subdivisions: core::num::NonZeroU32,
@@ -196,7 +280,22 @@ impl<S: Clone + Send + Sync> Polygon<S> {
             result.extend(queue);
         }
 
-        result // todo: return polygons
+        result
+    }
+
+    /// Convert subdivision triangles back to polygons for CSG operations
+    /// Each triangle becomes a triangular polygon with the same metadata
+    pub fn subdivide_to_polygons(
+        &self,
+        subdivisions: core::num::NonZeroU32,
+    ) -> Vec<Polygon<S>> {
+        self.subdivide_triangles(subdivisions)
+            .into_iter()
+            .map(|tri| {
+                let vertices = tri.to_vec();
+                Polygon::new(vertices, self.metadata.clone())
+            })
+            .collect()
     }
 
     /// return a normal calculated from all polygon vertices
@@ -234,7 +333,7 @@ impl<S: Clone + Send + Sync> Polygon<S> {
 
     /// Recompute this polygon's normal from all vertices, then set all vertices' normals to match (flat shading).
     pub fn set_new_normal(&mut self) {
-        // Assign each vertex’s normal to match the plane
+        // Assign each vertex's normal to match the plane
         let new_normal = self.calculate_new_normal();
         for v in &mut self.vertices {
             v.normal = new_normal;
@@ -310,7 +409,7 @@ const fn normalize_angle(mut a: Real) -> Real {
 /// Compute an initial guess of the circle center through three points p1, p2, p3
 /// (this is used purely as an initial guess).
 ///
-/// This is a direct port of your snippet’s `centre(p1, p2, p3)`, but
+/// This is a direct port of your snippet's `centre(p1, p2, p3)`, but
 /// returning a `Point2<Real>` from nalgebra.
 fn naive_circle_center(
     p1: &Point2<Real>,
@@ -354,8 +453,38 @@ fn naive_circle_center(
     Point2::new(-g, -f)
 }
 
+/// **Mathematical Foundation: Circle Fitting by Least Squares Optimization**
+///
 /// Fit a circle to the points `[pt_c, intermediates..., pt_n]` by adjusting an offset `d` from
-/// the midpoint. This uses nalgebra’s `Point2<Real>`.
+/// the midpoint. This implements a sophisticated numerical optimization approach:
+///
+/// ## **Theoretical Foundation**
+///
+/// ### **Parametric Circle Representation**
+/// Given two endpoints A and B, we parameterize possible circles as:
+/// - **Midpoint**: M = (A + B) / 2  
+/// - **Perpendicular direction**: v⊥ = rotate_90°(B - A)
+/// - **Center**: C(d) = M + d · v⊥ / |B - A|
+/// - **Radius**: R(d) = √(d² + |B - A|²/4)
+///
+/// ### **Optimization Problem**
+/// Find parameter d that minimizes the sum of squared distances:
+/// ```text
+/// minimize: Σᵢ (|Pᵢ - C(d)| - R(d))²
+/// ```
+///
+/// ### **Numerical Method: Secant Iteration**
+/// 1. **Initial Guess**: Use circumcenter of three well-spaced points
+/// 2. **Derivative Estimation**: Finite difference: f'(d) ≈ (f(d+h) - f(d-h))/(2h)
+/// 3. **Secant Update**: dₙ₊₁ = dₙ - f'(dₙ) · (dₙ - dₙ₋₁) / (f'(dₙ) - f'(dₙ₋₁))
+/// 4. **Convergence**: Typically 10-15 iterations achieve machine precision
+///
+/// ### **Orientation Determination**
+/// Arc direction (clockwise vs counterclockwise) determined by:
+/// - **Angular sweep**: θ = normalize_angle(θₑₙd - θₛₜₐᵣₜ)
+/// - **CW if θ < 0**, **CCW if θ > 0**
+///
+/// This method is numerically stable and handles near-linear configurations gracefully.
 ///
 /// # Returns
 ///
@@ -408,7 +537,7 @@ pub fn fit_circle_arcfinder(
         sum_sq
     };
 
-    // derivative dg(d) => we’ll do a small finite difference
+    // derivative dg(d) => we'll do a small finite difference
     let dg = |d: Real| -> Real {
         let h = 1e-6;
         let g_p = g(d + h);

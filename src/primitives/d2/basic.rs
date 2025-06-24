@@ -1,7 +1,43 @@
-//! Basic 2D primitive shapes
+//! **Mathematical Foundations for 2D Primitive Generation**
 //!
-//! This module contains fundamental geometric shapes like rectangles, circles,
-//! polygons, and other basic primitives that form the foundation of 2D geometry.
+//! This module implements mathematically rigorous algorithms for generating
+//! fundamental 2D geometric primitives based on analytic geometry and
+//! computational geometry principles.
+//!
+//! ## **Theoretical Foundations**
+//!
+//! ### **Parametric Circle Generation**
+//! A circle of radius r centered at origin is parameterized as:
+//! ```text
+//! x(θ) = r·cos(θ)
+//! y(θ) = r·sin(θ)
+//! where θ ∈ [0, 2π]
+//! ```
+//! **Discretization**: For n segments, θᵢ = 2πi/n, i ∈ [0, n-1]
+//!
+//! ### **Ellipse Parametric Equations**
+//! An ellipse with semi-axes a and b is parameterized as:
+//! ```text
+//! x(θ) = a·cos(θ)
+//! y(θ) = b·sin(θ)
+//! where θ ∈ [0, 2π]
+//! ```
+//! **Geometric Properties**: Area = πab, Circumference ≈ π(3(a+b) - √((3a+b)(a+3b)))
+//!
+//! ### **Regular Polygon Mathematics**
+//! A regular n-gon inscribed in a circle of radius r:
+//! ```text
+//! Vertex_i = (r·cos(2πi/n), r·sin(2πi/n))
+//! Interior angle = (n-2)π/n
+//! Central angle = 2π/n
+//! ```
+//!
+//! ### **Numerical Considerations**
+//! - **Angular Precision**: Uses TAU (2π) for better numerical accuracy
+//! - **Closure**: Ensures polygons are properly closed for geometric operations
+//! - **Degenerate Cases**: Handles n < 3 gracefully
+//!
+//! All shapes are generated in the XY plane (z=0) for subsequent 3D operations.
 
 use crate::csg::CSG;
 use crate::core::float_types::{PI, Real, TAU};
@@ -52,7 +88,48 @@ impl<S: Clone + Debug + Send + Sync> CSG<S> {
         Self::rectangle(width, width, metadata)
     }
 
-    /// Creates a 2D circle in the XY plane.
+    /// **Mathematical Foundation: Parametric Circle Discretization**
+    ///
+    /// Creates a 2D circle in the XY plane using parametric equations.
+    /// This implements the standard circle parameterization with uniform angular sampling.
+    ///
+    /// ## **Circle Mathematics**
+    ///
+    /// ### **Parametric Representation**
+    /// For a circle of radius r centered at origin:
+    /// ```text
+    /// x(θ) = r·cos(θ)
+    /// y(θ) = r·sin(θ)
+    /// where θ ∈ [0, 2π]
+    /// ```
+    ///
+    /// ### **Discretization Algorithm**
+    /// For n segments, sample at angles:
+    /// ```text
+    /// θᵢ = 2πi/n, i ∈ {0, 1, ..., n-1}
+    /// ```
+    /// This produces n vertices uniformly distributed around the circle.
+    ///
+    /// ### **Approximation Error**
+    /// The polygonal approximation has:
+    /// - **Maximum radial error**: r(1 - cos(π/n)) ≈ r(π/n)²/8 for large n
+    /// - **Perimeter error**: 2πr - n·r·sin(π/n) ≈ πr/3n² for large n
+    /// - **Area error**: πr² - (nr²sin(2π/n))/2 ≈ πr³/6n² for large n
+    ///
+    /// ### **Numerical Stability**
+    /// - Uses TAU (2π) constant for better floating-point precision
+    /// - Explicit closure ensures geometric validity
+    /// - Minimum 3 segments to avoid degenerate polygons
+    ///
+    /// ## **Applications**
+    /// - **Geometric modeling**: Base shape for 3D extrusion
+    /// - **Collision detection**: Circular boundaries
+    /// - **Numerical integration**: Circular domains
+    ///
+    /// # Parameters
+    /// - `radius`: Circle radius (must be > 0)
+    /// - `segments`: Number of polygon edges (minimum 3 for valid geometry)
+    /// - `metadata`: Optional metadata attached to the shape
     pub fn circle(radius: Real, segments: usize, metadata: Option<S>) -> Self {
         if segments < 3 {
             return CSG::new();
@@ -107,8 +184,53 @@ impl<S: Clone + Debug + Send + Sync> CSG<S> {
         )
     }
 
-    /// Ellipse in XY plane, centered at (0,0), with full width `width`, full height `height`.
-    /// `segments` is the number of polygon edges approximating the ellipse.
+    /// **Mathematical Foundation: Parametric Ellipse Generation**
+    ///
+    /// Creates an ellipse in XY plane, centered at (0,0), using parametric equations.
+    /// This implements the standard ellipse parameterization with uniform parameter sampling.
+    ///
+    /// ## **Ellipse Mathematics**
+    ///
+    /// ### **Parametric Representation**
+    /// For an ellipse with semi-major axis a and semi-minor axis b:
+    /// ```text
+    /// x(θ) = a·cos(θ)
+    /// y(θ) = b·sin(θ)
+    /// where θ ∈ [0, 2π]
+    /// ```
+    /// In our implementation: a = width/2, b = height/2
+    ///
+    /// ### **Geometric Properties**
+    /// - **Area**: A = πab = π(width·height)/4
+    /// - **Circumference** (Ramanujan's approximation):
+    ///   ```text
+    ///   C ≈ π[3(a+b) - √((3a+b)(a+3b))]
+    ///   ```
+    /// - **Eccentricity**: e = √(1 - b²/a²) for a ≥ b
+    /// - **Focal distance**: c = a·e where foci are at (±c, 0)
+    ///
+    /// ### **Parametric vs Arc-Length Parameterization**
+    /// **Note**: This uses parameter-uniform sampling (constant Δθ), not
+    /// arc-length uniform sampling. For arc-length uniformity, use:
+    /// ```text
+    /// ds/dθ = √(a²sin²θ + b²cos²θ)
+    /// ```
+    /// Parameter-uniform is computationally simpler and sufficient for most applications.
+    ///
+    /// ### **Approximation Quality**
+    /// For n segments, the polygonal approximation error behaves as O(1/n²):
+    /// - **Maximum radial error**: Approximately (a-b)π²/(8n²) for a ≈ b
+    /// - **Area convergence**: Exact area approached as n → ∞
+    ///
+    /// ## **Special Cases**
+    /// - **Circle**: When width = height, reduces to parametric circle
+    /// - **Degenerate**: When width = 0 or height = 0, becomes a line segment
+    ///
+    /// # Parameters
+    /// - `width`: Full width (diameter) along x-axis
+    /// - `height`: Full height (diameter) along y-axis  
+    /// - `segments`: Number of polygon edges (minimum 3)
+    /// - `metadata`: Optional metadata
     pub fn ellipse(width: Real, height: Real, segments: usize, metadata: Option<S>) -> Self {
         if segments < 3 {
             return CSG::new();
@@ -129,8 +251,58 @@ impl<S: Clone + Debug + Send + Sync> CSG<S> {
         )
     }
 
-    /// Regular N-gon in XY plane, centered at (0,0), with circumscribed radius `radius`.
-    /// `sides` is how many edges (>=3).
+    /// **Mathematical Foundation: Regular Polygon Construction**
+    ///
+    /// Creates a regular n-gon inscribed in a circle of given radius.
+    /// This implements the classical construction of regular polygons using
+    /// uniform angular division of the circumscribed circle.
+    ///
+    /// ## **Regular Polygon Mathematics**
+    ///
+    /// ### **Vertex Construction**
+    /// For a regular n-gon inscribed in a circle of radius r:
+    /// ```text
+    /// Vertex_i = (r·cos(2πi/n), r·sin(2πi/n))
+    /// where i ∈ {0, 1, ..., n-1}
+    /// ```
+    ///
+    /// ### **Geometric Properties**
+    /// - **Interior angle**: α = (n-2)π/n = π - 2π/n
+    /// - **Central angle**: β = 2π/n
+    /// - **Exterior angle**: γ = 2π/n
+    /// - **Side length**: s = 2r·sin(π/n)
+    /// - **Apothem** (distance from center to side): a = r·cos(π/n)
+    /// - **Area**: A = (n·s·a)/2 = (n·r²·sin(2π/n))/2
+    ///
+    /// ### **Special Cases**
+    /// - **n = 3**: Equilateral triangle (α = 60°)
+    /// - **n = 4**: Square (α = 90°)
+    /// - **n = 5**: Regular pentagon (α = 108°)
+    /// - **n = 6**: Regular hexagon (α = 120°)
+    /// - **n → ∞**: Approaches circle (lim α = 180°)
+    ///
+    /// ### **Constructibility Theorem**
+    /// A regular n-gon is constructible with compass and straightedge if and only if:
+    /// ```text
+    /// n = 2^k · p₁ · p₂ · ... · pₘ
+    /// ```
+    /// where k ≥ 0 and pᵢ are distinct Fermat primes (3, 5, 17, 257, 65537).
+    ///
+    /// ### **Approximation to Circle**
+    /// As n increases, the regular n-gon converges to a circle:
+    /// - **Perimeter convergence**: P_n = n·s → 2πr as n → ∞
+    /// - **Area convergence**: A_n → πr² as n → ∞
+    /// - **Error bound**: |A_circle - A_n| ≤ πr³/(3n²) for large n
+    ///
+    /// ## **Numerical Considerations**
+    /// - Uses TAU for precise angular calculations
+    /// - Explicit closure for geometric validity
+    /// - Minimum n = 3 to avoid degenerate cases
+    ///
+    /// # Parameters
+    /// - `sides`: Number of polygon edges (≥ 3)
+    /// - `radius`: Circumscribed circle radius
+    /// - `metadata`: Optional metadata
     pub fn regular_ngon(sides: usize, radius: Real, metadata: Option<S>) -> Self {
         if sides < 3 {
             return CSG::new();

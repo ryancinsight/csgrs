@@ -1,3 +1,64 @@
+//! **Mathematical Foundations for Rotational Extrusion**
+//!
+//! This module implements mathematically rigorous algorithms for creating
+//! surfaces of revolution by rotating 2D profiles around an axis based on
+//! classical differential geometry and surface theory.
+//!
+//! ## **Theoretical Foundation**
+//!
+//! ### **Surfaces of Revolution Definition**
+//! For a 2D profile curve C(t) = (x(t), y(t)) in the XY plane,
+//! rotation around the Y-axis generates a surface of revolution:
+//! ```text
+//! S(t,θ) = (x(t)·cos(θ), y(t), x(t)·sin(θ))
+//! where:
+//! - t ∈ [0,1]: Parameter along profile curve
+//! - θ ∈ [0,2π]: Rotation angle around Y-axis
+//! ```
+//!
+//! ### **Surface Normal Calculation**
+//! Surface normals are computed using the cross product of tangent vectors:
+//! ```text
+//! n⃗ = (∂S/∂t × ∂S/∂θ).normalize()
+//! ```
+//! For revolution surfaces, this simplifies to:
+//! ```text
+//! n⃗ = (x'cos(θ), -x, x'sin(θ)).normalize()
+//! where x' = dx/dt is the derivative of the profile
+//! ```
+//!
+//! ### **Winding Orientation Rules**
+//! Profile curve orientation determines surface normal direction:
+//! - **Counter-clockwise profiles**: Generate outward-facing normals
+//! - **Clockwise profiles**: Generate inward-facing normals (holes)
+//! - **Consistent orientation**: Essential for CSG boolean operations
+//!
+//! ### **Partial Revolution Handling**
+//! For partial rotations (angle < 360°):
+//! 1. **Side surfaces**: Generated from profile rotation
+//! 2. **Start cap**: Planar surface at θ = 0
+//! 3. **End cap**: Planar surface at θ = angle
+//! 4. **Cap orientation**: Ensures manifold topology
+//!
+//! ### **Multi-Contour Support**
+//! - **Exterior contours**: Create solid boundaries
+//! - **Interior contours**: Create holes and cavities
+//! - **Proper nesting**: Interior contours must be inside exterior
+//!
+//! ## **Geometric Properties**
+//! For a surface of revolution with profile length L and rotation angle α:
+//! - **Surface Area**: A = ∫ 2πx(t)·|C'(t)| dt × (α/2π)
+//! - **Volume**: V = ∫ πx²(t)·y'(t) dt × (α/2π)
+//! - **Centroid**: Computed using Pappus's theorems
+//!
+//! ## **Applications**
+//! - **Pottery and vessels**: Symmetric containers
+//! - **Mechanical components**: Shafts, pulleys, gears
+//! - **Architectural elements**: Columns, domes, arches
+//! - **Artistic modeling**: Vases, sculptures
+//!
+//! All operations preserve geometric accuracy and maintain proper topology.
+
 use crate::csg::CSG;
 use crate::core::float_types::{EPSILON, Real};
 use crate::geometry::Polygon;
@@ -8,24 +69,78 @@ use std::fmt::Debug;
 use std::sync::OnceLock;
 
 impl<S: Clone + Debug + Send + Sync> CSG<S> {
-    /// Rotate-extrude (revolve) only the Polygon and MultiPolygon geometry in `self.geometry`
-    /// around the Y-axis from 0..`angle_degs` in `segments` steps, producing side walls
-    /// in an orientation consistent with the polygon's winding.
+    /// **Mathematical Foundation: Surface of Revolution Generation**
     ///
-    /// - Ignores `self.polygons`.
-    /// - Returns a new CSG containing **only** the newly extruded side polygons (no end caps).
-    /// - `angle_degs`: how far to revolve, in degrees (e.g. 360 for a full revolve).
-    /// - `segments`: number of subdivisions around the revolve.
+    /// Rotate-extrude (revolve) 2D geometry around the Y-axis to create surfaces of revolution.
+    /// This implements the complete mathematical theory of revolution surfaces with
+    /// proper orientation handling and cap generation.
     ///
-    /// # Key Points
-    /// - Only 2D geometry in `self.geometry` is used. Any `self.polygons` are ignored.
-    /// - Axis of revolution: **Y-axis**. We treat each ring's (x,y) -> revolve_around_y(x,y,theta).
-    /// - Exterior rings (CCW in Geo) produce outward-facing side polygons.
-    /// - Interior rings (CW) produce inward-facing side polygons ("holes").
-    /// - If `angle_degs < 360`, we add **two caps**: one at angle=0, one at angle=angle_degs.
-    ///   - Cap orientation is set so that normals face outward, consistent with a solid.
-    /// - Returns a new CSG with `.polygons` containing only the side walls + any caps.
-    ///   The `.geometry` is empty, i.e. `GeometryCollection::default()`.
+    /// ## **Revolution Mathematics**
+    ///
+    /// ### **Parametric Surface Generation**
+    /// For each 2D boundary point (x,y), generate revolution surface:
+    /// ```text
+    /// S(θ) = (x·cos(θ), y, x·sin(θ))
+    /// where θ ∈ [0, angle_radians]
+    /// ```
+    ///
+    /// ### **Surface Mesh Construction**
+    /// The algorithm creates quadrilateral strips:
+    /// 1. **Vertex Grid**: (n_segments+1) × (n_boundary_points) vertices
+    /// 2. **Quad Formation**: Connect adjacent vertices in parameter space
+    /// 3. **Orientation**: Preserve winding from 2D profile
+    ///
+    /// ### **Normal Vector Calculation**
+    /// For each quad, compute normals using right-hand rule:
+    /// ```text
+    /// n⃗ = (v⃗₁ - v⃗₀) × (v⃗₂ - v⃗₀)
+    /// ```
+    /// Direction depends on profile curve orientation.
+    ///
+    /// ### **Boundary Orientation Handling**
+    /// - **Exterior boundaries (CCW)**: Generate outward-facing surfaces
+    /// - **Interior boundaries (CW)**: Generate inward-facing surfaces (holes)
+    /// - **Winding preservation**: Essential for manifold topology
+    ///
+    /// ### **Partial Revolution Caps**
+    /// For angle < 360°, generate planar caps:
+    /// 1. **Start cap** (θ=0): Triangulated profile at initial position
+    /// 2. **End cap** (θ=angle): Triangulated profile at final position
+    /// 3. **Cap normals**: Point outward from solid interior
+    /// 4. **Manifold closure**: Ensures watertight geometry
+    ///
+    /// ### **Multi-Polygon Support**
+    /// - **Exterior polygons**: Create main solid boundaries
+    /// - **Interior polygons**: Create holes and cavities
+    /// - **Nesting rules**: Interior must be properly contained
+    ///
+    /// ## **Algorithm Complexity**
+    /// - **Boundary Processing**: O(n) for n boundary edges
+    /// - **Surface Generation**: O(n×s) for s segments
+    /// - **Cap Triangulation**: O(n log n) for complex profiles
+    ///
+    /// ## **Geometric Properties**
+    /// - **Surface continuity**: C⁰ (positional) at segment boundaries
+    /// - **Normal continuity**: Discontinuous at segment boundaries (faceted)
+    /// - **Manifold property**: Maintained for valid input profiles
+    ///
+    /// ## **Applications**
+    /// - **Turned objects**: Lathe-created components
+    /// - **Vessels**: Bowls, vases, containers
+    /// - **Mechanical parts**: Pulleys, gears, shafts
+    /// - **Architectural elements**: Columns, balusters
+    ///
+    /// ## **Numerical Considerations**
+    /// - **Trigonometric precomputation**: Improves performance
+    /// - **Degeneracy handling**: Skips zero-length edges
+    /// - **Precision**: Maintains accuracy for small angles
+    ///
+    /// # Parameters
+    /// - `angle_degs`: Revolution angle in degrees (0-360)
+    /// - `segments`: Number of angular subdivisions (≥ 2)
+    ///
+    /// **Note**: Only processes 2D geometry in `self.geometry`. 3D polygons are ignored.
+    /// Returns CSG with revolution surfaces only (original 2D geometry cleared).
     pub fn rotate_extrude(&self, angle_degs: Real, segments: usize) -> CSG<S> {
         if segments < 2 {
             panic!("rotate_extrude requires at least 2 segments.");

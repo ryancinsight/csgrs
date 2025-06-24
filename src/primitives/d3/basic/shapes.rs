@@ -1,6 +1,44 @@
-//! Basic 3D box-like shapes
+//! **Mathematical Foundations for 3D Box Geometry**
 //!
-//! This module contains fundamental box-like shapes such as cuboids and cubes.
+//! This module implements mathematically rigorous algorithms for generating
+//! axis-aligned rectangular prisms (cuboids) and cubes based on solid geometry
+//! and computational topology principles.
+//!
+//! ## **Theoretical Foundations**
+//!
+//! ### **Cuboid Geometry**
+//! A right rectangular prism (cuboid) in 3D space is defined by:
+//! - **Vertices**: 8 corner points forming a rectangular parallelepiped
+//! - **Edges**: 12 edges connecting adjacent vertices
+//! - **Faces**: 6 rectangular faces, each with consistent outward normal
+//!
+//! ### **Coordinate System**
+//! Standard axis-aligned cuboid from origin:
+//! ```text
+//! (0,0,0) → (width, length, height)
+//! ```
+//! This creates a right-handed coordinate system with consistent face orientations.
+//!
+//! ### **Face Normal Calculation**
+//! Each face normal is computed using the right-hand rule:
+//! ```text
+//! n⃗ = (v⃗₁ - v⃗₀) × (v⃗₂ - v⃗₀)
+//! ```
+//! where vertices are ordered counter-clockwise when viewed from outside.
+//!
+//! ### **Winding Order Convention**
+//! All faces use counter-clockwise vertex ordering when viewed from exterior:
+//! - **Ensures consistent outward normals**
+//! - **Enables proper backface culling**
+//! - **Maintains manifold topology for CSG operations**
+//!
+//! ## **Geometric Properties**
+//! - **Volume**: V = width × length × height
+//! - **Surface Area**: A = 2(wl + wh + lh)
+//! - **Diagonal**: d = √(w² + l² + h²)
+//! - **Centroid**: (w/2, l/2, h/2)
+//!
+//! All shapes maintain proper topology for boolean operations and mesh processing.
 
 use crate::csg::CSG;
 use crate::core::float_types::Real;
@@ -10,8 +48,72 @@ use nalgebra::{Point3, Vector3};
 use std::fmt::Debug;
 
 impl<S: Clone + Debug + Send + Sync> CSG<S> {
-    /// Create a right prism (a box) that spans from (0, 0, 0)
-    /// to (width, length, height). All dimensions must be >= 0.
+    /// **Mathematical Foundation: Axis-Aligned Cuboid Construction**
+    ///
+    /// Create a right rectangular prism (cuboid) spanning from origin to (width, length, height).
+    /// This implements a mathematically rigorous construction ensuring proper topology
+    /// and consistent face orientations for CSG operations.
+    ///
+    /// ## **Cuboid Mathematics**
+    ///
+    /// ### **Vertex Enumeration**
+    /// The 8 vertices are systematically enumerated using binary encoding:
+    /// ```text
+    /// (i,j,k) → (i×width, j×length, k×height)
+    /// where i,j,k ∈ {0,1}
+    /// ```
+    /// This gives vertices: p₀₀₀, p₁₀₀, p₀₁₀, p₁₁₀, p₀₀₁, p₁₀₁, p₀₁₁, p₁₁₁
+    ///
+    /// ### **Face Construction Algorithm**
+    /// Each face is a quadrilateral with vertices ordered counter-clockwise
+    /// when viewed from outside:
+    ///
+    /// 1. **Bottom Face** (z=0, normal = -ẑ):
+    ///    p₀₀₀ → p₀₁₀ → p₁₁₀ → p₁₀₀
+    ///
+    /// 2. **Top Face** (z=height, normal = +ẑ):
+    ///    p₀₀₁ → p₁₀₁ → p₁₁₁ → p₀₁₁
+    ///
+    /// 3. **Front Face** (y=0, normal = -ŷ):
+    ///    p₀₀₀ → p₁₀₀ → p₁₀₁ → p₀₀₁
+    ///
+    /// 4. **Back Face** (y=length, normal = +ŷ):
+    ///    p₀₁₀ → p₀₁₁ → p₁₁₁ → p₁₁₀
+    ///
+    /// 5. **Left Face** (x=0, normal = -x̂):
+    ///    p₀₀₀ → p₀₀₁ → p₀₁₁ → p₀₁₀
+    ///
+    /// 6. **Right Face** (x=width, normal = +x̂):
+    ///    p₁₀₀ → p₁₁₀ → p₁₁₁ → p₁₀₁
+    ///
+    /// ### **Normal Vector Verification**
+    /// Each face normal is verified using the right-hand rule:
+    /// ```text
+    /// n⃗ = (v⃗₁ - v⃗₀) × (v⃗₂ - v⃗₀)
+    /// ```
+    /// For consistent outward orientation.
+    ///
+    /// ### **Topological Properties**
+    /// - **Manifold**: Each edge shared by exactly 2 faces
+    /// - **Closed**: No boundary edges
+    /// - **Orientable**: Consistent normal directions
+    /// - **Genus 0**: Topologically equivalent to a sphere
+    ///
+    /// ## **Geometric Invariants**
+    /// - **Volume**: V = width × length × height
+    /// - **Surface Area**: A = 2(width×length + width×height + length×height)
+    /// - **Euler Characteristic**: χ = V - E + F = 8 - 12 + 6 = 2
+    ///
+    /// ## **Numerical Considerations**
+    /// - All dimensions must be ≥ 0 for valid geometry
+    /// - Face normals are unit vectors for proper lighting
+    /// - Vertex precision maintains geometric consistency
+    ///
+    /// # Parameters
+    /// - `width`: X-dimension (≥ 0)
+    /// - `length`: Y-dimension (≥ 0) 
+    /// - `height`: Z-dimension (≥ 0)
+    /// - `metadata`: Optional metadata for all faces
     pub fn cuboid(width: Real, length: Real, height: Real, metadata: Option<S>) -> CSG<S> {
         // Define the eight corner points of the prism.
         //    (x, y, z)
