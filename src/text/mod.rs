@@ -4,4 +4,4 @@
 pub mod hershey;
 
 #[cfg(feature = "truetype-text")]
-pub mod truetype; 
+pub mod truetype;

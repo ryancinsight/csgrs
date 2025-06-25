@@ -3,7 +3,6 @@
 //!
 //! ![Example CSG output][Example CSG output]
 #![cfg_attr(doc, doc = doc_image_embed::embed_image!("Example CSG output", "docs/csg.png"))]
-//!
 //! # Features
 //! #### Default
 //! - **f64**: use f64 as Real
@@ -52,27 +51,9 @@ compile_error!("Either 'delaunay' or 'earcut' feature must be specified, but not
 ))]
 compile_error!("Either 'f64' or 'f32' feature must be specified, but not both");
 
+pub use core::{EPSILON, FRAC_PI_2, PI, Real, TAU, ValidationError};
 pub use csg::CSG;
-pub use core::{Real, EPSILON, PI, FRAC_PI_2, TAU, ValidationError};
 pub use geometry::Vertex;
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
 
 #[cfg(test)]
 mod tests;

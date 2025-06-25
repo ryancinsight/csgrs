@@ -20,14 +20,14 @@ struct PlyVertex {
 
 impl<S: Clone + Debug + Send + Sync> CSG<S> {
     /// Export this CSG to PLY format as a string
-    /// 
+    ///
     /// Creates a Stanford PLY file containing:
     /// 1. All 3D polygons from `self.polygons` (tessellated to triangles)
     /// 2. Any 2D geometry from `self.geometry` (projected to 3D)
-    /// 
+    ///
     /// # Arguments
     /// * `comment` - Optional comment to include in PLY header
-    /// 
+    ///
     /// # Example
     /// ```
     /// use csgrs::CSG;
@@ -37,44 +37,45 @@ impl<S: Clone + Debug + Send + Sync> CSG<S> {
     /// ```
     pub fn to_ply(&self, comment: &str) -> String {
         let mut ply_content = String::new();
-        
+
         let mut vertices = Vec::new();
         let mut faces = Vec::new();
-        
+
         // Process 3D polygons
         for poly in &self.polygons {
             // Tessellate polygon to triangles
             let triangles = poly.tessellate();
-            
+
             for triangle in triangles {
                 let mut face_indices = Vec::new();
-                
+
                 for vertex in triangle {
-                    let vertex_idx = Self::add_unique_vertex_ply(&mut vertices, vertex.pos, vertex.normal);
+                    let vertex_idx =
+                        Self::add_unique_vertex_ply(&mut vertices, vertex.pos, vertex.normal);
                     face_indices.push(vertex_idx);
                 }
-                
+
                 if face_indices.len() == 3 {
                     faces.push(face_indices);
                 }
             }
         }
-        
+
         // Process 2D geometry (project to XY plane at Z=0)
         for geom in &self.geometry.0 {
             match geom {
                 geo::Geometry::Polygon(poly2d) => {
                     self.add_2d_polygon_to_ply(poly2d, &mut vertices, &mut faces);
-                }
+                },
                 geo::Geometry::MultiPolygon(mp) => {
                     for poly2d in &mp.0 {
                         self.add_2d_polygon_to_ply(poly2d, &mut vertices, &mut faces);
                     }
-                }
-                _ => {} // Skip other geometry types
+                },
+                _ => {}, // Skip other geometry types
             }
         }
-        
+
         // Write PLY header
         ply_content.push_str("ply\n");
         ply_content.push_str("format ascii 1.0\n");
@@ -90,30 +91,34 @@ impl<S: Clone + Debug + Send + Sync> CSG<S> {
         ply_content.push_str(&format!("element face {}\n", faces.len()));
         ply_content.push_str("property list uchar int vertex_indices\n");
         ply_content.push_str("end_header\n");
-        
+
         // Write vertices
         for vertex in &vertices {
             ply_content.push_str(&format!(
                 "{:.6} {:.6} {:.6} {:.6} {:.6} {:.6}\n",
-                vertex.position.x, vertex.position.y, vertex.position.z,
-                vertex.normal.x, vertex.normal.y, vertex.normal.z
+                vertex.position.x,
+                vertex.position.y,
+                vertex.position.z,
+                vertex.normal.x,
+                vertex.normal.y,
+                vertex.normal.z
             ));
         }
-        
+
         // Write faces (each face is a triangle: 3 v1 v2 v3)
         for face in &faces {
             ply_content.push_str(&format!("3 {} {} {}\n", face[0], face[1], face[2]));
         }
-        
+
         ply_content
     }
-    
+
     /// Export this CSG to a PLY file
-    /// 
+    ///
     /// # Arguments
     /// * `writer` - Where to write the PLY data
     /// * `comment` - Comment to include in PLY header
-    /// 
+    ///
     /// # Example
     /// ```
     /// use csgrs::CSG;
@@ -129,24 +134,29 @@ impl<S: Clone + Debug + Send + Sync> CSG<S> {
         let ply_content = self.to_ply(comment);
         writer.write_all(ply_content.as_bytes())
     }
-    
+
     // Helper function to add unique vertex with normal for PLY
-    fn add_unique_vertex_ply(vertices: &mut Vec<PlyVertex>, position: Point3<Real>, normal: Vector3<Real>) -> usize {
+    fn add_unique_vertex_ply(
+        vertices: &mut Vec<PlyVertex>,
+        position: Point3<Real>,
+        normal: Vector3<Real>,
+    ) -> usize {
         const EPSILON: Real = 1e-6;
-        
+
         // Check if vertex already exists (within tolerance)
         for (i, existing) in vertices.iter().enumerate() {
-            if (existing.position.coords - position.coords).norm() < EPSILON &&
-               (existing.normal - normal).norm() < EPSILON {
+            if (existing.position.coords - position.coords).norm() < EPSILON
+                && (existing.normal - normal).norm() < EPSILON
+            {
                 return i;
             }
         }
-        
+
         // Add new vertex
         vertices.push(PlyVertex { position, normal });
         vertices.len() - 1
     }
-    
+
     // Helper function to add 2D polygon to PLY data
     fn add_2d_polygon_to_ply(
         &self,
@@ -155,39 +165,36 @@ impl<S: Clone + Debug + Send + Sync> CSG<S> {
         faces: &mut Vec<Vec<usize>>,
     ) {
         // Get the exterior ring
-        let exterior: Vec<[Real; 2]> = poly2d
-            .exterior()
-            .coords_iter()
-            .map(|c| [c.x, c.y])
-            .collect();
-        
+        let exterior: Vec<[Real; 2]> =
+            poly2d.exterior().coords_iter().map(|c| [c.x, c.y]).collect();
+
         // Get holes
         let holes_vec: Vec<Vec<[Real; 2]>> = poly2d
             .interiors()
             .iter()
             .map(|ring| ring.coords_iter().map(|c| [c.x, c.y]).collect())
             .collect();
-        
+
         let hole_refs: Vec<&[[Real; 2]]> = holes_vec.iter().map(|h| &h[..]).collect();
-        
+
         // Tessellate the 2D polygon
         let triangles_2d = Self::tessellate_2d(&exterior, &hole_refs);
-        
+
         // Add triangles with normal pointing up (positive Z)
         let normal = Vector3::new(0.0, 0.0, 1.0);
-        
+
         for triangle in triangles_2d {
             let mut face_indices = Vec::new();
-            
+
             for point in triangle {
                 let vertex_3d = Point3::new(point.x, point.y, point.z);
                 let vertex_idx = Self::add_unique_vertex_ply(vertices, vertex_3d, normal);
                 face_indices.push(vertex_idx);
             }
-            
+
             if face_indices.len() == 3 {
                 faces.push(face_indices);
             }
         }
     }
-} 
+}

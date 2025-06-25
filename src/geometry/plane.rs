@@ -12,7 +12,7 @@
 //! - **Three-point form**: Defined by three non-collinear points A, B, C
 //!
 //! ### **Orientation Testing Algorithms**
-//! 
+//!
 //! **Robust Geometric Predicates**: This implementation uses the `robust` crate's
 //! `orient3d` predicate, which implements Shewchuk's exact arithmetic methods for
 //! robust orientation testing. The predicate computes the sign of the determinant:
@@ -27,7 +27,7 @@
 //! This determines whether point D lies above, below, or on the plane defined by A, B, C.
 //!
 //! ### **Polygon Splitting Algorithm**
-//! 
+//!
 //! **Sutherland-Hodgman Clipping**: The `split_polygon` function implements a 3D
 //! generalization of the Sutherland-Hodgman polygon clipping algorithm:
 //!
@@ -42,7 +42,7 @@
 //!    where d is the plane's signed distance from origin.
 //!
 //! ### **Coordinate System Transformations**
-//! 
+//!
 //! **Plane-to-XY Projection**: The `to_xy_transform` method computes an orthonormal
 //! transformation that maps the plane to the XY-plane (z=0):
 //!
@@ -59,15 +59,15 @@
 //! - **Degenerate Case Handling**: Proper fallbacks for collinear points and zero-area triangles
 //!
 //! ## **Algorithm Complexity**
-//! 
+//!
 //! - **Plane Construction**: O(n²) for optimal triangle selection, O(1) for basic construction
 //! - **Orientation Testing**: O(1) per point with robust predicates
 //! - **Polygon Splitting**: O(n) per polygon, where n is the number of vertices
 //!
 //! Unless stated otherwise, all tolerances are governed by `float_types::EPSILON`.
 
-use crate::core::float_types::{EPSILON, Real};
 use super::Polygon;
+use crate::core::float_types::{EPSILON, Real};
 use crate::geometry::Vertex;
 use nalgebra::{Isometry3, Matrix4, Point3, Rotation3, Translation3, Vector3};
 use robust::{Coord3D, orient3d};
@@ -168,12 +168,12 @@ impl Plane {
         };
 
         // Construct the reference normal for the original polygon using Newell's Method.
-        let reference_normal = vertices
-            .iter()
-            .zip(vertices.iter().cycle().skip(1))
-            .fold(Vector3::zeros(), |acc, (curr, next)| {
+        let reference_normal = vertices.iter().zip(vertices.iter().cycle().skip(1)).fold(
+            Vector3::zeros(),
+            |acc, (curr, next)| {
                 acc + (curr.pos - Point3::origin()).cross(&(next.pos - Point3::origin()))
-            });
+            },
+        );
 
         if plane_hq.normal().dot(&reference_normal) < 0.0 {
             plane_hq.flip(); // flip in-place to agree with winding
@@ -277,10 +277,19 @@ impl Plane {
         std::mem::swap(&mut self.point_a, &mut self.point_b);
     }
 
+    /// Classify a polygon with respect to the plane.
+    /// Returns a bitmask of `COPLANAR`, `FRONT`, and `BACK`.
+    pub fn classify_polygon<S: Clone>(&self, polygon: &Polygon<S>) -> i8 {
+        let mut polygon_type: i8 = 0;
+        for vertex in &polygon.vertices {
+            polygon_type |= self.orient_point(&vertex.pos);
+        }
+        polygon_type
+    }
+
     // ────────────────────────────────────────────────────────────────
     //  Robust polygon split
     // ────────────────────────────────────────────────────────────────
-    ///
     /// Returns four buckets:
     /// `(coplanar_front, coplanar_back, front, back)`.
     pub fn split_polygon<S: Clone + Send + Sync>(
@@ -377,12 +386,12 @@ impl Plane {
     /// Returns (T, T_inv), where:
     /// - `T` maps a point on this plane into XY plane (z=0) with the plane's normal going to +Z
     /// - `T_inv` is the inverse transform, mapping back
-    /// 
+    ///
     /// **Mathematical Foundation**: This implements an orthonormal transformation:
     /// 1. **Rotation Matrix**: R = rotation_between(plane_normal, +Z)
     /// 2. **Translation**: Translate so plane passes through origin
     /// 3. **Combined Transform**: T = T₂ · R · T₁
-    /// 
+    ///
     /// The transformation preserves distances and angles, enabling 2D algorithms
     /// to be applied to 3D planar geometry.
     pub fn to_xy_transform(&self) -> (Matrix4<Real>, Matrix4<Real>) {

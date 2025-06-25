@@ -29,7 +29,6 @@ impl<S: Clone + Debug + Send + Sync> CSG<S> {
         let mut out = String::new();
         out.push_str(&format!("solid {}\n", name));
 
-        //
         // (A) Write out all *3D* polygons
         //
         for poly in &self.polygons {
@@ -54,7 +53,6 @@ impl<S: Clone + Debug + Send + Sync> CSG<S> {
             }
         }
 
-        //
         // (B) Write out all *2D* geometry from `self.geometry`
         //     We only handle Polygon and MultiPolygon.  We tessellate in XY, set z=0.
         //
@@ -198,7 +196,6 @@ impl<S: Clone + Debug + Send + Sync> CSG<S> {
             }
         }
 
-        //
         // (B) Triangulate any 2D geometry from self.geometry (Polygon, MultiPolygon).
         //     We treat these as lying in the XY plane, at Z=0, with a default normal of +Z.
         //
@@ -294,7 +291,6 @@ impl<S: Clone + Debug + Send + Sync> CSG<S> {
             }
         }
 
-        //
         // (C) Encode into a binary STL buffer
         //
         let mut cursor = Cursor::new(Vec::new());

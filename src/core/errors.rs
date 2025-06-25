@@ -22,8 +22,14 @@ pub enum ValidationError {
     TooFewPoints(Point3<Real>),
     /// (InvalidCoordinate) The coordinate has a NaN or infinite
     InvalidCoordinate(Point3<Real>),
-    /// (RingNotClosed) The ring’s first/last points differ
+    /// (RingNotClosed) The ring's first/last points differ
     RingNotClosed(Point3<Real>),
+    /// (MismatchedVertices) operation requires polygons with same number of vertices
+    MismatchedVertices,
+    /// (IndexOutOfRange) operation requires polygons with same number of vertices
+    IndexOutOfRange,
+    /// (InvalidArguments) operation requires polygons with same number of vertices
+    InvalidArguments,
     /// In general, anything else
     Other(String, Option<Point3<Real>>),
 }

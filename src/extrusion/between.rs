@@ -1,6 +1,7 @@
 use crate::csg::CSG;
 use crate::geometry::Polygon;
 use std::fmt::Debug;
+use crate::core::ValidationError;
 
 impl<S: Clone + Debug + Send + Sync> CSG<S> {
     /// Extrudes (or "lofts") a closed 3D volume between two polygons in space.
@@ -13,13 +14,11 @@ impl<S: Clone + Debug + Send + Sync> CSG<S> {
         bottom: &Polygon<S>,
         top: &Polygon<S>,
         flip_bottom_polygon: bool,
-    ) -> CSG<S> {
+    ) -> Result<CSG<S>, ValidationError> {
         let n = bottom.vertices.len();
-        assert_eq!(
-            n,
-            top.vertices.len(),
-            "extrude_between: both polygons must have the same number of vertices" // todo: return error
-        );
+        if n != top.vertices.len() {
+            return Err(ValidationError::MismatchedVertices);
+        }
 
         // Conditionally flip the bottom polygon if requested.
         let bottom_poly = if flip_bottom_polygon {
@@ -58,6 +57,6 @@ impl<S: Clone + Debug + Send + Sync> CSG<S> {
             polygons.push(side_poly);
         }
 
-        CSG::from_polygons(&polygons)
+        Ok(CSG::from_polygons(&polygons))
     }
-} 
+}

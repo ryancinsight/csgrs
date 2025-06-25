@@ -114,4 +114,4 @@ impl<S: Clone + Debug + Send + Sync> CSG<S> {
             Aabb::new(mins, maxs)
         })
     }
-} 
+}

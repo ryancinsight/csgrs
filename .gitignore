@@ -12,3 +12,21 @@ prompt.txt
 *.amf
 *.svg
 stl
+
+# Editor-specific files
+.vscode/
+.idea/
+
+# OS-specific files
+.DS_Store
+Thumbs.db
+
+# Generated output
+/stl/
+/outputs/
+*.stl
+*.obj
+*.amf
+*.ply
+
+Cargo.lock

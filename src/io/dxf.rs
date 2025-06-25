@@ -80,8 +80,8 @@ impl<S: Clone + Debug + Send + Sync> CSG<S> {
                     .normalize();
 
                     for i in 0..segments {
-                        let theta =
-                            2.0 * crate::core::float_types::PI * (i as Real) / (segments as Real);
+                        let theta = 2.0 * crate::core::float_types::PI * (i as Real)
+                            / (segments as Real);
                         let x = center.x as Real + radius * theta.cos();
                         let y = center.y as Real + radius * theta.sin();
                         let z = center.z as Real;

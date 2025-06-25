@@ -1,6 +1,6 @@
 use super::CSG;
-use crate::csg::bsp::Node;
 use crate::core::float_types::parry3d::bounding_volume::{Aabb, BoundingVolume};
+use crate::csg::bsp::Node;
 use crate::geometry::Polygon;
 use geo::{BooleanOps, Geometry, GeometryCollection, Orient, orient::Direction};
 use std::fmt::Debug;
@@ -78,7 +78,7 @@ impl<S: Clone + Debug + Send + Sync> CSG<S> {
             match g {
                 Geometry::Polygon(_) | Geometry::MultiPolygon(_) => {
                     // skip [multi]polygons
-                }
+                },
                 _ => final_gc.0.push(g.clone()),
             }
         }
@@ -86,7 +86,7 @@ impl<S: Clone + Debug + Send + Sync> CSG<S> {
             match g {
                 Geometry::Polygon(_) | Geometry::MultiPolygon(_) => {
                     // skip [multi]polygons
-                }
+                },
                 _ => final_gc.0.push(g.clone()),
             }
         }
@@ -158,7 +158,7 @@ impl<S: Clone + Debug + Send + Sync> CSG<S> {
         // (If you need to exclude lines/points that lie inside other, you'd need more checks here.)
         for g in &self.geometry.0 {
             match g {
-                Geometry::Polygon(_) | Geometry::MultiPolygon(_) => {} // skip
+                Geometry::Polygon(_) | Geometry::MultiPolygon(_) => {}, // skip
                 _ => final_gc.0.push(g.clone()),
             }
         }
@@ -224,13 +224,13 @@ impl<S: Clone + Debug + Send + Sync> CSG<S> {
         // todo: detect intersection of non-polygons
         for g in &self.geometry.0 {
             match g {
-                Geometry::Polygon(_) | Geometry::MultiPolygon(_) => {} // skip
+                Geometry::Polygon(_) | Geometry::MultiPolygon(_) => {}, // skip
                 _ => final_gc.0.push(g.clone()),
             }
         }
         for g in &other.geometry.0 {
             match g {
-                Geometry::Polygon(_) | Geometry::MultiPolygon(_) => {} // skip
+                Geometry::Polygon(_) | Geometry::MultiPolygon(_) => {}, // skip
                 _ => final_gc.0.push(g.clone()),
             }
         }

@@ -1,8 +1,8 @@
 //! Triply‑Periodic Minimal Surfaces rewritten to leverage the generic
 //! signed‑distance mesher in `sdf.rs`.
 
-use crate::csg::CSG;
 use crate::core::float_types::Real;
+use crate::csg::CSG;
 use nalgebra::Point3;
 use std::fmt::Debug;
 
@@ -50,19 +50,19 @@ impl<S: Clone + Debug + Send + Sync> CSG<S> {
     ) -> CSG<S> {
         let res = (resolution.max(2), resolution.max(2), resolution.max(2));
         let period_inv = 1.0 / period;
-        
+
         self.tpms_from_sdf(
             move |p: &Point3<Real>| {
                 // Pre-compute scaled coordinates for efficiency
                 let x_scaled = p.x * period_inv;
                 let y_scaled = p.y * period_inv;
                 let z_scaled = p.z * period_inv;
-                
+
                 // Pre-compute trigonometric values to avoid redundant calculations
                 let (sin_x, cos_x) = x_scaled.sin_cos();
                 let (sin_y, cos_y) = y_scaled.sin_cos();
                 let (sin_z, cos_z) = z_scaled.sin_cos();
-                
+
                 // **Mathematical Formula**: Gyroid surface equation
                 // G(x,y,z) = sin(x)cos(y) + sin(y)cos(z) + sin(z)cos(x)
                 (sin_x * cos_y) + (sin_y * cos_z) + (sin_z * cos_x)
@@ -85,14 +85,14 @@ impl<S: Clone + Debug + Send + Sync> CSG<S> {
     ) -> CSG<S> {
         let res = (resolution.max(2), resolution.max(2), resolution.max(2));
         let period_inv = 1.0 / period;
-        
+
         self.tpms_from_sdf(
             move |p: &Point3<Real>| {
                 // Pre-compute scaled coordinates
                 let x_scaled = p.x * period_inv;
                 let y_scaled = p.y * period_inv;
                 let z_scaled = p.z * period_inv;
-                
+
                 // **Mathematical Formula**: Schwarz P-surface equation
                 // P(x,y,z) = cos(x) + cos(y) + cos(z)
                 x_scaled.cos() + y_scaled.cos() + z_scaled.cos()
@@ -115,25 +115,25 @@ impl<S: Clone + Debug + Send + Sync> CSG<S> {
     ) -> CSG<S> {
         let res = (resolution.max(2), resolution.max(2), resolution.max(2));
         let period_inv = 1.0 / period;
-        
+
         self.tpms_from_sdf(
             move |p: &Point3<Real>| {
                 // Pre-compute scaled coordinates
                 let x_scaled = p.x * period_inv;
                 let y_scaled = p.y * period_inv;
                 let z_scaled = p.z * period_inv;
-                
+
                 // Pre-compute all trigonometric values once
                 let (sin_x, cos_x) = x_scaled.sin_cos();
                 let (sin_y, cos_y) = y_scaled.sin_cos();
                 let (sin_z, cos_z) = z_scaled.sin_cos();
-                
+
                 // **Mathematical Formula**: Schwarz Diamond surface equation
                 // D(x,y,z) = sin(x)sin(y)sin(z) + sin(x)cos(y)cos(z) + cos(x)sin(y)cos(z) + cos(x)cos(y)sin(z)
-                (sin_x * sin_y * sin_z) + 
-                (sin_x * cos_y * cos_z) + 
-                (cos_x * sin_y * cos_z) + 
-                (cos_x * cos_y * sin_z)
+                (sin_x * sin_y * sin_z)
+                    + (sin_x * cos_y * cos_z)
+                    + (cos_x * sin_y * cos_z)
+                    + (cos_x * cos_y * sin_z)
             },
             res,
             iso_value,

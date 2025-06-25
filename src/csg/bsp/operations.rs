@@ -1,11 +1,47 @@
 //! Non-parallel BSP tree operations (clip, build, slice)
 
-use crate::core::float_types::EPSILON;
-use crate::geometry::{BACK, COPLANAR, FRONT, Plane, SPANNING, Polygon, Vertex};
 use super::core::Node;
+use crate::core::float_types::{EPSILON, Real};
+use crate::geometry::{BACK, COPLANAR, FRONT, Plane, Polygon, SPANNING, Vertex};
 use std::fmt::Debug;
 
 impl<S: Clone + Send + Sync + Debug> Node<S> {
+    fn pick_best_splitting_plane(&self, polygons: &[Polygon<S>]) -> Plane {
+        const K_SPANS: Real = 8.0; // Weight for spanning polygons
+        const K_BALANCE: Real = 1.0; // Weight for front/back balance
+
+        let mut best_plane = polygons[0].plane.clone();
+        let mut best_score = Real::MAX;
+
+        // Take a sample of polygons as candidate planes
+        let sample_size = polygons.len().min(20);
+        for p in polygons.iter().take(sample_size) {
+            let plane = &p.plane;
+            let mut num_front = 0;
+            let mut num_back = 0;
+            let mut num_spanning = 0;
+
+            for poly in polygons {
+                match plane.classify_polygon(poly) {
+                    COPLANAR => {}, // Not counted for balance
+                    FRONT => num_front += 1,
+                    BACK => num_back += 1,
+                    SPANNING => num_spanning += 1,
+                    _ => num_spanning += 1, // Treat any other combination as spanning
+                }
+            }
+
+            let score = K_SPANS * num_spanning as Real
+                + K_BALANCE * ((num_front - num_back) as Real).abs();
+
+            if score < best_score {
+                best_score = score;
+                best_plane = plane.clone();
+            }
+        }
+        best_plane
+    }
+
     /// Build a BSP tree from the given polygons
     /// **Mathematical Foundation**: Recursively partition 3D space using hyperplanes,
     /// classifying polygons as FRONT, BACK, COPLANAR, or SPANNING relative to the splitting plane.
@@ -15,9 +51,9 @@ impl<S: Clone + Send + Sync + Debug> Node<S> {
             return;
         }
 
-        // Choose the first polygon's plane as the splitting plane if not already set.
+        // Choose the best splitting plane using a heuristic if not already set.
         if self.plane.is_none() {
-            self.plane = Some(polygons[0].plane.clone());
+            self.plane = Some(self.pick_best_splitting_plane(polygons));
         }
         let plane = self.plane.as_ref().unwrap();
 
@@ -28,7 +64,7 @@ impl<S: Clone + Send + Sync + Debug> Node<S> {
         // Optimized polygon classification using iterator pattern
         // **Mathematical Theorem**: Each polygon is classified relative to the splitting plane
         for polygon in polygons {
-            let (coplanar_front, coplanar_back, mut front_parts, mut back_parts) = 
+            let (coplanar_front, coplanar_back, mut front_parts, mut back_parts) =
                 plane.split_polygon(polygon);
 
             // Extend collections efficiently with iterator chains
@@ -52,6 +88,64 @@ impl<S: Clone + Send + Sync + Debug> Node<S> {
         }
     }
 
+    /// Creates a new BSP node from polygons using the appropriate build method
+    ///
+    /// This function automatically chooses between parallel and non-parallel implementations
+    /// based on feature availability and input size.
+    pub fn from_polygons(polygons: &[Polygon<S>]) -> Self {
+        #[cfg(feature = "parallel")]
+        {
+            if polygons.len() > 100 {
+                // Use parallel for larger datasets
+                let mut node = Self::new();
+                node.build_parallel(polygons);
+                return node;
+            }
+        }
+
+        // Default to non-parallel implementation
+        let mut node = Self::new();
+        node.build(polygons);
+        node
+    }
+
+    /// Clips polygons using the appropriate method based on feature availability
+    pub fn clip_polygons_auto(&self, polygons: &[Polygon<S>]) -> Vec<Polygon<S>> {
+        #[cfg(feature = "parallel")]
+        {
+            if polygons.len() > 50 {
+                return self.clip_polygons_parallel(polygons);
+            }
+        }
+
+        self.clip_polygons(polygons)
+    }
+
+    /// Clips to another BSP tree using the appropriate method
+    pub fn clip_to_auto(&mut self, bsp: &Node<S>) {
+        #[cfg(feature = "parallel")]
+        {
+            if self.polygons.len() > 50 {
+                self.clip_to_parallel(bsp);
+                return;
+            }
+        }
+
+        self.clip_to(bsp);
+    }
+
+    /// Slices the BSP tree using the appropriate method
+    pub fn slice_auto(&self, slicing_plane: &Plane) -> (Vec<Polygon<S>>, Vec<[Vertex; 2]>) {
+        #[cfg(feature = "parallel")]
+        {
+            if self.polygons.len() > 50 {
+                return self.slice_parallel(slicing_plane);
+            }
+        }
+
+        self.slice(slicing_plane)
+    }
+
     /// Recursively remove all polygons in `polygons` that are inside this BSP tree
     /// **Mathematical Foundation**: Uses plane classification to determine polygon visibility.
     /// Polygons entirely in BACK half-space are clipped (removed).
@@ -62,14 +156,14 @@ impl<S: Clone + Send + Sync + Debug> Node<S> {
         }
 
         let plane = self.plane.as_ref().unwrap();
-        
+
         // Pre-allocate for better performance
         let mut front_polys = Vec::with_capacity(polygons.len());
         let mut back_polys = Vec::with_capacity(polygons.len());
 
         // Optimized polygon splitting with iterator patterns
         for polygon in polygons {
-            let (coplanar_front, coplanar_back, mut front_parts, mut back_parts) = 
+            let (coplanar_front, coplanar_back, mut front_parts, mut back_parts) =
                 plane.split_polygon(polygon);
 
             // Efficient coplanar polygon classification using iterator chain
@@ -95,7 +189,7 @@ impl<S: Clone + Send + Sync + Debug> Node<S> {
         if let Some(back_node) = &self.back {
             result.extend(back_node.clip_polygons(&back_polys));
         }
-        
+
         result
     }
 
@@ -132,13 +226,14 @@ impl<S: Clone + Send + Sync + Debug> Node<S> {
             if vcount < 2 {
                 continue; // degenerate polygon => skip
             }
-            
+
             // Use iterator chain to compute vertex types more efficiently
-            let types: Vec<_> = poly.vertices
+            let types: Vec<_> = poly
+                .vertices
                 .iter()
                 .map(|vertex| slicing_plane.orient_point(&vertex.pos))
                 .collect();
-            
+
             let polygon_type = types.iter().fold(0, |acc, &vertex_type| acc | vertex_type);
 
             // Based on the combined classification of its vertices:
@@ -146,11 +241,11 @@ impl<S: Clone + Send + Sync + Debug> Node<S> {
                 COPLANAR => {
                     // The entire polygon is in the plane, so push it to the coplanar list.
                     coplanar_polygons.push(poly.clone());
-                }
+                },
 
                 FRONT | BACK => {
                     // Entirely on one side => no intersection. We skip it.
-                }
+                },
 
                 SPANNING => {
                     // Use iterator chain to collect intersection points more efficiently
@@ -180,11 +275,12 @@ impl<S: Clone + Send + Sync + Debug> Node<S> {
 
                     // Convert crossing points to intersection edges
                     intersection_edges.extend(
-                        crossing_points.chunks_exact(2)
-                            .map(|chunk| [chunk[0].clone(), chunk[1].clone()])
+                        crossing_points
+                            .chunks_exact(2)
+                            .map(|chunk| [chunk[0].clone(), chunk[1].clone()]),
                     );
-                }
-                _ => {}
+                },
+                _ => {},
             }
         }
 
@@ -195,4 +291,4 @@ impl<S: Clone + Send + Sync + Debug> Node<S> {
             back.slice_recursive(slicing_plane, coplanar_polygons, intersection_edges);
         }
     }
-} 
+}

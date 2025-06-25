@@ -1,7 +1,7 @@
 //! Implementation of [metaballs](https://en.wikipedia.org/wiki/Metaballs)
 
-use crate::csg::CSG;
 use crate::core::float_types::{EPSILON, Real};
+use crate::csg::CSG;
 use crate::geometry::Polygon;
 use crate::geometry::Vertex;
 use fast_surface_nets::{SurfaceNetsBuffer, surface_nets};
@@ -33,28 +33,25 @@ impl MetaBall {
     /// **Optimization**: Early termination for distant points and vectorized computation.
     pub fn influence(&self, p: &Point3<Real>) -> Real {
         let distance_squared = (p - self.center).norm_squared();
-        
+
         // Early termination optimization: if point is very far from metaball,
         // influence approaches zero - can skip expensive division
         let threshold_distance_sq = self.radius * self.radius * 1000.0; // 1000x radius
         if distance_squared > threshold_distance_sq {
             return 0.0;
         }
-        
+
         // Numerically stable influence calculation with epsilon
         let denominator = distance_squared + EPSILON;
         (self.radius * self.radius) / denominator
     }
 }
 
-/// **Mathematical Foundation**: Scalar field F(p) = Σ I_i(p) where I_i is the influence 
+/// **Mathematical Foundation**: Scalar field F(p) = Σ I_i(p) where I_i is the influence
 /// function of the i-th metaball. This creates smooth isosurfaces at threshold values.
 /// **Optimization**: Iterator-based summation with potential for vectorization.
 fn scalar_field_metaballs(balls: &[MetaBall], p: &Point3<Real>) -> Real {
-    balls
-        .iter()
-        .map(|ball| ball.influence(p))
-        .sum()
+    balls.iter().map(|ball| ball.influence(p)).sum()
 }
 
 // helper – quantise to avoid FP noise
@@ -172,7 +169,7 @@ impl<S: Clone + Debug + Send + Sync> CSG<S> {
                     let dx = x - center.x;
                     let dy = y - center.y;
                     let distance_sq = dx * dx + dy * dy;
-                    
+
                     // Early termination for very distant points
                     let threshold_distance_sq = radius * radius * 1000.0;
                     if distance_sq > threshold_distance_sq {

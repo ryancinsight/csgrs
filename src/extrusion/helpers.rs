@@ -28,4 +28,4 @@ pub fn polygon_from_slice<S: Clone + Send + Sync>(
     }
 
     Polygon::new(verts, metadata)
-} 
+}

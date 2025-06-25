@@ -3,12 +3,9 @@
 //! This module contains shapes generated using parametric equations and mathematical formulas,
 //! offering flexibility and precision in shape generation.
 
-use crate::csg::CSG;
 use crate::core::float_types::{EPSILON, PI, Real, TAU};
-use geo::{
-    Geometry, GeometryCollection, LineString,
-    Polygon as GeoPolygon,
-};
+use crate::csg::CSG;
+use geo::{Geometry, GeometryCollection, LineString, Polygon as GeoPolygon};
 use std::fmt::Debug;
 use std::sync::OnceLock;
 
@@ -195,4 +192,4 @@ impl<S: Clone + Debug + Send + Sync> CSG<S> {
             metadata,
         )
     }
-} 
+}

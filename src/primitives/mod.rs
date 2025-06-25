@@ -24,8 +24,8 @@ pub use d3::basic::*;
 #[allow(unused_imports)]
 pub use d3::complex::*;
 #[allow(unused_imports)]
-pub use d3::specialized::*;
+pub use d3::gears::*;
 #[allow(unused_imports)]
 pub use d3::platonic::*;
 #[allow(unused_imports)]
-pub use d3::gears::*; 
+pub use d3::specialized::*;

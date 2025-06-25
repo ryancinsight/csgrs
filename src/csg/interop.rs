@@ -1,8 +1,8 @@
 use super::CSG;
 use crate::core::float_types::{
+    Real,
     parry3d::shape::{SharedShape, TriMesh},
     rapier3d::prelude::*,
-    Real,
 };
 use nalgebra::{Point3, Quaternion, Unit, Vector3};
 use std::fmt::Debug;
@@ -167,4 +167,4 @@ impl<S: Clone + Debug + Send + Sync> CSG<S> {
 
         mesh
     }
-} 
+}

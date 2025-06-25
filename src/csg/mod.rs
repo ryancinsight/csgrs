@@ -1,30 +1,26 @@
-use crate::core::float_types::parry3d::{
-    bounding_volume::Aabb,
-};
+use crate::core::float_types::Real;
+use crate::core::float_types::parry3d::bounding_volume::Aabb;
 use crate::core::float_types::rapier3d::prelude::*;
-use crate::core::float_types::{Real};
 use crate::geometry::Polygon;
 use crate::geometry::Vertex;
 use geo::{
-    Coord, CoordsIter, Geometry,
-    GeometryCollection, LineString, MultiPolygon, Polygon as GeoPolygon,
+    Coord, CoordsIter, Geometry, GeometryCollection, LineString, MultiPolygon,
+    Polygon as GeoPolygon,
 };
-use nalgebra::{
-    Point3, Vector3,
-};
+use nalgebra::{Point3, Vector3};
 use std::fmt::Debug;
 use std::sync::OnceLock;
 
 #[cfg(feature = "parallel")]
 use rayon::prelude::*;
 
-pub mod ops;
-pub mod transform;
-pub mod distribute;
-pub mod mesh;
-pub mod query;
-pub mod interop;
 pub mod bsp;
+pub mod distribute;
+pub mod interop;
+pub mod mesh;
+pub mod ops;
+pub mod query;
+pub mod transform;
 
 /// The main CSG solid structure. Contains a list of 3D polygons, 2D polylines, and some metadata.
 #[derive(Debug, Clone)]
@@ -157,22 +153,22 @@ impl<S: Clone + Debug + Send + Sync> CSG<S> {
         {
             use geo::TriangulateEarcut;
             // Convert the outer ring into a `LineString`
-			let outer_coords: Vec<Coord<Real>> =
-				outer.iter().map(|&[x, y]| Coord { x, y }).collect();
+            let outer_coords: Vec<Coord<Real>> =
+                outer.iter().map(|&[x, y]| Coord { x, y }).collect();
 
-			// Convert each hole into its own `LineString`
-			let holes_coords: Vec<LineString<Real>> = holes
-				.iter()
-				.map(|hole| {
-					let coords: Vec<Coord<Real>> =
-						hole.iter().map(|&[x, y]| Coord { x, y }).collect();
-					LineString::new(coords)
-				})
-				.collect();
+            // Convert each hole into its own `LineString`
+            let holes_coords: Vec<LineString<Real>> = holes
+                .iter()
+                .map(|hole| {
+                    let coords: Vec<Coord<Real>> =
+                        hole.iter().map(|&[x, y]| Coord { x, y }).collect();
+                    LineString::new(coords)
+                })
+                .collect();
 
-			// Ear-cut triangulation on the polygon (outer + holes)
-			let polygon = GeoPolygon::new(LineString::new(outer_coords), holes_coords);
-            
+            // Ear-cut triangulation on the polygon (outer + holes)
+            let polygon = GeoPolygon::new(LineString::new(outer_coords), holes_coords);
+
             let triangulation = polygon.earcut_triangles_raw();
             let triangle_indices = triangulation.triangle_indices;
             let vertices = triangulation.vertices;
@@ -190,17 +186,13 @@ impl<S: Clone + Debug + Send + Sync> CSG<S> {
             result
         }
 
-		// Helper that forces |v| > SPADE_MIN or 0.0 to avoid a panic.
+        // Helper that forces |v| > SPADE_MIN or 0.0 to avoid a panic.
         #[cfg(feature = "delaunay")]
         #[inline]
         fn clamp_spade(v: Real) -> Real {
             // This should be shared with Polygon::tessellate()
             const SPADE_MIN: Real = 1.793662034335766e-43;
-            if v.abs() < SPADE_MIN {
-                0.0
-            } else {
-                v
-            }
+            if v.abs() < SPADE_MIN { 0.0 } else { v }
         }
 
         #[cfg(feature = "delaunay")]

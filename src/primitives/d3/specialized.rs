@@ -2,8 +2,8 @@
 //!
 //! This module contains specialized shapes like arrows, eggs, and teardrops.
 
-use crate::csg::CSG;
 use crate::core::float_types::{EPSILON, Real};
+use crate::csg::CSG;
 use nalgebra::{Matrix4, Point3, Rotation3, Translation3, Vector3};
 use std::fmt::Debug;
 
@@ -118,12 +118,18 @@ impl<S: Clone + Debug + Send + Sync> CSG<S> {
 
         // Build a large rectangle that cuts off everything
         let cutter_height = 9999.0; // some large number
-        let rect_cutter = CSG::square(cutter_height, metadata.clone())
-            .translate(-cutter_height, -cutter_height / 2.0, 0.0);
+        let rect_cutter = CSG::square(cutter_height, metadata.clone()).translate(
+            -cutter_height,
+            -cutter_height / 2.0,
+            0.0,
+        );
 
         let half_egg = egg_2d.difference(&rect_cutter);
 
-        half_egg.rotate_extrude(360.0, revolve_segments).convex_hull()
+        half_egg
+            .rotate_extrude(360.0, revolve_segments)
+            .unwrap()
+            .convex_hull()
     }
 
     /// Creates a 3D "teardrop" solid by revolving the existing 2D `teardrop` profile 360° around the Y-axis (via rotate_extrude).
@@ -147,14 +153,18 @@ impl<S: Clone + Debug + Send + Sync> CSG<S> {
 
         // Build a large rectangle that cuts off everything
         let cutter_height = 9999.0; // some large number
-        let rect_cutter = CSG::square(cutter_height, metadata.clone())
-            .translate(-cutter_height, -cutter_height / 2.0, 0.0);
+        let rect_cutter = CSG::square(cutter_height, metadata.clone()).translate(
+            -cutter_height,
+            -cutter_height / 2.0,
+            0.0,
+        );
 
         let half_teardrop = td_2d.difference(&rect_cutter);
 
         // revolve 360 degrees
         half_teardrop
             .rotate_extrude(360.0, revolve_segments)
+            .unwrap()
             .convex_hull()
     }
 
@@ -178,4 +188,4 @@ impl<S: Clone + Debug + Send + Sync> CSG<S> {
         let td_2d = Self::teardrop_outline(width, length, shape_segments, metadata.clone());
         td_2d.extrude(height).convex_hull()
     }
-} 
+}

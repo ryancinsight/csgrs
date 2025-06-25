@@ -3,12 +3,9 @@
 //! This module contains shapes commonly used for decorative purposes,
 //! artistic designs, and visual elements in user interfaces.
 
+use crate::core::float_types::{EPSILON, PI, Real, TAU};
 use crate::csg::CSG;
-use crate::core::float_types::{EPSILON, Real, TAU, PI};
-use geo::{
-    Geometry, GeometryCollection, LineString,
-    Polygon as GeoPolygon,
-};
+use geo::{Geometry, GeometryCollection, LineString, Polygon as GeoPolygon};
 use std::fmt::Debug;
 
 impl<S: Clone + Debug + Send + Sync> CSG<S> {
@@ -27,10 +24,12 @@ impl<S: Clone + Debug + Send + Sync> CSG<S> {
         let mut coords: Vec<(Real, Real)> = (0..num_points)
             .flat_map(|i| {
                 let theta_out = i as Real * step;
-                let outer_point = (outer_radius * theta_out.cos(), outer_radius * theta_out.sin());
+                let outer_point =
+                    (outer_radius * theta_out.cos(), outer_radius * theta_out.sin());
 
                 let theta_in = theta_out + 0.5 * step;
-                let inner_point = (inner_radius * theta_in.cos(), inner_radius * theta_in.sin());
+                let inner_point =
+                    (inner_radius * theta_in.cos(), inner_radius * theta_in.sin());
 
                 [outer_point, inner_point]
             })
@@ -64,14 +63,12 @@ impl<S: Clone + Debug + Send + Sync> CSG<S> {
         let half_seg = segments / 2;
 
         let mut coords = vec![(0.0, 0.0)]; // Start at the tip
-        coords.extend(
-            (0..=half_seg).map(|i| {
-                let t = PI * (i as Real / half_seg as Real); // Corrected angle for semi-circle
-                let x = -r * t.cos();
-                let y = center_y + r * t.sin();
-                (x, y)
-            }),
-        );
+        coords.extend((0..=half_seg).map(|i| {
+            let t = PI * (i as Real / half_seg as Real); // Corrected angle for semi-circle
+            let x = -r * t.cos();
+            let y = center_y + r * t.sin();
+            (x, y)
+        }));
         coords.push((0.0, 0.0)); // Close path to the tip
 
         let polygon_2d = GeoPolygon::new(LineString::from(coords), vec![]);
@@ -184,4 +181,4 @@ impl<S: Clone + Debug + Send + Sync> CSG<S> {
 
         big.difference(&small)
     }
-} 
+}

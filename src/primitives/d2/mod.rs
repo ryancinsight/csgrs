@@ -17,4 +17,4 @@ pub use complex::*;
 #[allow(unused_imports)]
 pub use curves::*;
 #[allow(unused_imports)]
-pub use gears::*; 
+pub use gears::*;

@@ -3,12 +3,9 @@
 //! This module contains shapes commonly used in mechanical design,
 //! engineering applications, and functional components.
 
-use crate::csg::CSG;
 use crate::core::float_types::{EPSILON, FRAC_PI_2, PI, Real};
-use geo::{
-    Geometry, GeometryCollection, LineString,
-    Polygon as GeoPolygon,
-};
+use crate::csg::CSG;
+use geo::{Geometry, GeometryCollection, LineString, Polygon as GeoPolygon};
 use std::fmt::Debug;
 
 impl<S: Clone + Debug + Send + Sync> CSG<S> {
@@ -66,8 +63,11 @@ impl<S: Clone + Debug + Send + Sync> CSG<S> {
         let circle = CSG::circle(circle_radius, segments, metadata.clone());
 
         // 2) Rectangle (handle)
-        let handle = CSG::rectangle(handle_width, handle_height, metadata)
-            .translate(-handle_width * 0.5, 0.0, 0.0);
+        let handle = CSG::rectangle(handle_width, handle_height, metadata).translate(
+            -handle_width * 0.5,
+            0.0,
+            0.0,
+        );
 
         // 3) Union them
         circle.union(&handle)
@@ -161,4 +161,4 @@ impl<S: Clone + Debug + Send + Sync> CSG<S> {
 
         with_both_flats
     }
-} 
+}

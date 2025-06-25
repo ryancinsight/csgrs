@@ -2,12 +2,13 @@
 //!
 //! This module contains more sophisticated 3D shapes like polyhedra, ellipsoids, and tori.
 
-use crate::csg::CSG;
 use crate::core::float_types::Real;
+use crate::csg::CSG;
 use crate::geometry::Polygon;
 use crate::geometry::Vertex;
 use nalgebra::{Point3, Vector3};
 use std::fmt::Debug;
+use crate::core::ValidationError;
 
 impl<S: Clone + Debug + Send + Sync> CSG<S> {
     /// Creates a CSG polyhedron from raw vertex data (`points`) and face indices.
@@ -38,13 +39,13 @@ impl<S: Clone + Debug + Send + Sync> CSG<S> {
     ///     vec![3, 0, 4],
     /// ];
     ///
-    /// let csg_poly: CSG<()> = CSG::polyhedron(pts, &fcs, None);
+    /// let csg_poly: CSG<()> = CSG::polyhedron(pts, &fcs, None).unwrap();
     /// ```
     pub fn polyhedron(
         points: &[[Real; 3]],
         faces: &[Vec<usize>],
         metadata: Option<S>,
-    ) -> CSG<S> {
+    ) -> Result<CSG<S>, ValidationError> {
         let mut polygons = Vec::new();
 
         for face in faces {
@@ -58,12 +59,7 @@ impl<S: Clone + Debug + Send + Sync> CSG<S> {
             for &idx in face {
                 // Ensure the index is valid
                 if idx >= points.len() {
-                    panic!(
-                        // todo return error
-                        "Face index {} is out of range (points.len = {}).",
-                        idx,
-                        points.len()
-                    );
+                    return Err(ValidationError::IndexOutOfRange);
                 }
                 let [x, y, z] = points[idx];
                 face_vertices.push(Vertex::new(
@@ -83,7 +79,7 @@ impl<S: Clone + Debug + Send + Sync> CSG<S> {
             polygons.push(poly);
         }
 
-        CSG::from_polygons(&polygons)
+        Ok(CSG::from_polygons(&polygons))
     }
 
     /// Creates an ellipsoid by taking a sphere of radius=1 and scaling it by (rx, ry, rz).
@@ -122,6 +118,8 @@ impl<S: Clone + Debug + Send + Sync> CSG<S> {
     ) -> Self {
         let circle = CSG::circle(minor_r, segments_minor.max(3), metadata.clone())
             .translate(major_r, 0.0, 0.0);
-        circle.rotate_extrude(360.0, segments_major.max(3))
+        circle
+            .rotate_extrude(360.0, segments_major.max(3))
+            .unwrap()
     }
-} 
+}

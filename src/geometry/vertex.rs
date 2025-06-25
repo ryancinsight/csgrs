@@ -85,9 +85,9 @@ impl Vertex {
         // Spherical linear interpolation for normals
         let n0 = self.normal.normalize();
         let n1 = other.normal.normalize();
-        
+
         let dot = n0.dot(&n1).clamp(-1.0, 1.0);
-        
+
         // If normals are nearly parallel, use linear interpolation
         if (dot.abs() - 1.0).abs() < Real::EPSILON {
             let new_normal = (self.normal + (other.normal - self.normal) * t).normalize();
@@ -96,7 +96,7 @@ impl Vertex {
 
         let omega = dot.acos();
         let sin_omega = omega.sin();
-        
+
         if sin_omega.abs() < Real::EPSILON {
             // Fallback to linear interpolation
             let new_normal = (self.normal + (other.normal - self.normal) * t).normalize();
@@ -105,7 +105,7 @@ impl Vertex {
 
         let a = ((1.0 - t) * omega).sin() / sin_omega;
         let b = (t * omega).sin() / sin_omega;
-        
+
         let new_normal = (a * n0 + b * n1).normalize();
         Vertex::new(new_pos, new_normal)
     }
@@ -126,7 +126,7 @@ impl Vertex {
     /// ```text
     /// d²(v₁, v₂) = (x₁-x₂)² + (y₁-y₂)² + (z₁-z₂)²
     /// ```
-    /// 
+    ///
     /// Useful for distance comparisons without expensive square root operation.
     pub fn distance_squared_to(&self, other: &Vertex) -> Real {
         (self.pos - other.pos).norm_squared()
@@ -138,7 +138,7 @@ impl Vertex {
     /// ```text
     /// θ = arccos(n₁ · n₂ / (|n₁| · |n₂|))
     /// ```
-    /// 
+    ///
     /// Returns angle in radians [0, π].
     pub fn normal_angle_to(&self, other: &Vertex) -> Real {
         let n1 = self.normal.normalize();
@@ -154,7 +154,7 @@ impl Vertex {
     /// p_avg = Σᵢ(wᵢ · pᵢ) / Σᵢ(wᵢ)
     /// n_avg = normalize(Σᵢ(wᵢ · nᵢ))
     /// ```
-    /// 
+    ///
     /// This is fundamental for Laplacian smoothing and normal averaging.
     pub fn weighted_average(vertices: &[(Vertex, Real)]) -> Option<Vertex> {
         if vertices.is_empty() {
@@ -166,13 +166,14 @@ impl Vertex {
             return None;
         }
 
-        let weighted_pos = vertices.iter().fold(Point3::origin(), |acc, (v, w)| {
-            acc + v.pos.coords * (*w)
-        }) / total_weight;
+        let weighted_pos = vertices
+            .iter()
+            .fold(Point3::origin(), |acc, (v, w)| acc + v.pos.coords * (*w))
+            / total_weight;
 
-        let weighted_normal = vertices.iter().fold(Vector3::zeros(), |acc, (v, w)| {
-            acc + v.normal * (*w)
-        });
+        let weighted_normal = vertices
+            .iter()
+            .fold(Vector3::zeros(), |acc, (v, w)| acc + v.normal * (*w));
 
         let normalized_normal = if weighted_normal.norm() > Real::EPSILON {
             weighted_normal.normalize()
@@ -190,11 +191,11 @@ impl Vertex {
     /// p = u·p₁ + v·p₂ + w·p₃
     /// n = normalize(u·n₁ + v·n₂ + w·n₃)
     /// ```
-    /// 
+    ///
     /// This is fundamental for triangle interpolation and surface parameterization.
     pub fn barycentric_interpolate(
         v1: &Vertex,
-        v2: &Vertex, 
+        v2: &Vertex,
         v3: &Vertex,
         u: Real,
         v: Real,
@@ -205,15 +206,13 @@ impl Vertex {
         let (u, v, w) = if total.abs() > Real::EPSILON {
             (u / total, v / total, w / total)
         } else {
-            (1.0/3.0, 1.0/3.0, 1.0/3.0) // Fallback to centroid
+            (1.0 / 3.0, 1.0 / 3.0, 1.0 / 3.0) // Fallback to centroid
         };
 
-        let new_pos = Point3::from(
-            u * v1.pos.coords + v * v2.pos.coords + w * v3.pos.coords
-        );
+        let new_pos = Point3::from(u * v1.pos.coords + v * v2.pos.coords + w * v3.pos.coords);
 
         let new_normal = (u * v1.normal + v * v2.normal + w * v3.normal).normalize();
-        
+
         Vertex::new(new_pos, new_normal)
     }
 
@@ -224,7 +223,7 @@ impl Vertex {
     /// w_ij = (cot(α) + cot(β)) / 2
     /// ```
     /// Where α and β are the angles opposite to edge ij in adjacent triangles.
-    /// 
+    ///
     /// This provides a better approximation to the continuous Laplacian operator
     /// compared to uniform weights.
     pub fn compute_cotangent_weight(
@@ -246,12 +245,12 @@ impl Vertex {
             let v3 = triangle_vertices[(i + 2) % triangle_vertices.len()];
 
             // Check if this triangle contains our edge
-            let contains_edge = (v1.pos == center.pos && v2.pos == neighbor.pos) ||
-                               (v2.pos == center.pos && v3.pos == neighbor.pos) ||
-                               (v3.pos == center.pos && v1.pos == neighbor.pos) ||
-                               (v1.pos == neighbor.pos && v2.pos == center.pos) ||
-                               (v2.pos == neighbor.pos && v3.pos == center.pos) ||
-                               (v3.pos == neighbor.pos && v1.pos == center.pos);
+            let contains_edge = (v1.pos == center.pos && v2.pos == neighbor.pos)
+                || (v2.pos == center.pos && v3.pos == neighbor.pos)
+                || (v3.pos == center.pos && v1.pos == neighbor.pos)
+                || (v1.pos == neighbor.pos && v2.pos == center.pos)
+                || (v2.pos == neighbor.pos && v3.pos == center.pos)
+                || (v3.pos == neighbor.pos && v1.pos == center.pos);
 
             if contains_edge {
                 // Find the vertex opposite to the edge
@@ -268,7 +267,7 @@ impl Vertex {
                 let edge2 = neighbor.pos - opposite.pos;
                 let cos_angle = edge1.normalize().dot(&edge2.normalize());
                 let sin_angle = edge1.normalize().cross(&edge2.normalize()).norm();
-                
+
                 if sin_angle > Real::EPSILON {
                     cot_sum += cos_angle / sin_angle;
                     weight_count += 1;
@@ -288,26 +287,27 @@ impl Vertex {
     /// Analyze vertex connectivity in mesh topology using actual adjacency data:
     /// - **Valence**: Number of edges incident to vertex (from adjacency map)
     /// - **Regularity**: Measure of how close valence is to optimal (6 for interior vertices)
-    /// 
+    ///
     /// ## **Vertex Index Lookup**
     /// This function requires the vertex's global index in the mesh adjacency graph.
     /// The caller should provide the correct index from the mesh connectivity analysis.
-    /// 
+    ///
     /// ## **Regularity Scoring**
     /// ```text
     /// regularity = 1 / (1 + |valence - target| / target)
     /// ```
     /// Where target = 6 for triangular meshes (optimal valence for interior vertices).
-    /// 
+    ///
     /// Returns (valence, regularity_score) where regularity ∈ [0,1], 1 = optimal.
     pub fn analyze_connectivity_with_index(
         vertex_index: usize,
         adjacency_map: &HashMap<usize, Vec<usize>>,
     ) -> (usize, Real) {
-        let valence = adjacency_map.get(&vertex_index)
+        let valence = adjacency_map
+            .get(&vertex_index)
             .map(|neighbors| neighbors.len())
             .unwrap_or(0);
-        
+
         // Optimal valence is 6 for interior vertices in triangular meshes
         let target_valence = 6;
         let regularity: Real = if valence > 0 {
@@ -325,7 +325,7 @@ impl Vertex {
     /// Simplified connectivity analysis that searches for the vertex in the adjacency map
     /// by position matching (with epsilon tolerance). This is slower but more convenient
     /// when you don't have the global vertex index readily available.
-    /// 
+    ///
     /// **Note**: This is a convenience method. For performance-critical applications,
     /// use `analyze_connectivity_with_index` with pre-computed vertex indices.
     pub fn analyze_connectivity_by_position(
@@ -342,7 +342,7 @@ impl Vertex {
                 break;
             }
         }
-        
+
         if let Some(idx) = vertex_index {
             Self::analyze_connectivity_with_index(idx, adjacency_map)
         } else {
@@ -358,13 +358,9 @@ impl Vertex {
     /// H ≈ (2π - Σθᵢ) / A_mixed
     /// ```
     /// Where θᵢ are angles around the vertex and A_mixed is the mixed area.
-    /// 
+    ///
     /// This provides a discrete approximation to the mean curvature at a vertex.
-    pub fn estimate_mean_curvature(
-        &self,
-        neighbors: &[Vertex],
-        face_areas: &[Real],
-    ) -> Real {
+    pub fn estimate_mean_curvature(&self, neighbors: &[Vertex], face_areas: &[Real]) -> Real {
         if neighbors.len() < 3 {
             return 0.0;
         }
@@ -374,10 +370,10 @@ impl Vertex {
         for i in 0..neighbors.len() {
             let prev = &neighbors[(i + neighbors.len() - 1) % neighbors.len()];
             let next = &neighbors[(i + 1) % neighbors.len()];
-            
+
             let v1 = (prev.pos - self.pos).normalize();
             let v2 = (next.pos - self.pos).normalize();
-            
+
             let dot = v1.dot(&v2).clamp(-1.0, 1.0);
             angle_sum += dot.acos();
         }
@@ -401,18 +397,18 @@ impl Vertex {
     /// **Mathematical Foundation: Advanced Mesh Quality Analysis**
     ///
     /// Comprehensive vertex quality assessment using multiple metrics:
-    /// 
+    ///
     /// ## **Quality Metrics**
     /// - **Regularity**: How close vertex valence is to optimal (6 for triangular meshes)
     /// - **Curvature**: Discrete mean curvature estimation
     /// - **Edge Uniformity**: Standard deviation of incident edge lengths
     /// - **Normal Variation**: Consistency of adjacent face normals
-    /// 
+    ///
     /// ## **Applications**
     /// - **Adaptive Refinement**: Identify vertices needing subdivision
     /// - **Quality Scoring**: Overall mesh quality assessment
     /// - **Feature Detection**: Identify sharp features and boundaries
-    /// 
+    ///
     /// Returns (regularity, curvature, edge_uniformity, normal_variation)
     pub fn comprehensive_quality_analysis(
         &self,
@@ -422,66 +418,75 @@ impl Vertex {
         vertex_normals: &HashMap<usize, Vector3<Real>>,
     ) -> (Real, Real, Real, Real) {
         // Get connectivity information
-        let (valence, regularity) = Self::analyze_connectivity_with_index(vertex_index, adjacency_map);
-        
+        let (valence, regularity) =
+            Self::analyze_connectivity_with_index(vertex_index, adjacency_map);
+
         if valence == 0 {
             return (0.0, 0.0, 0.0, 0.0);
         }
-        
+
         // Get neighbor positions for edge length analysis
         let neighbors = adjacency_map.get(&vertex_index).unwrap();
         let mut edge_lengths = Vec::new();
         let mut neighbor_normals = Vec::new();
-        
+
         for &neighbor_idx in neighbors {
             if let Some(&neighbor_pos) = vertex_positions.get(&neighbor_idx) {
                 let edge_length = (self.pos - neighbor_pos).norm();
                 edge_lengths.push(edge_length);
-                
+
                 if let Some(&neighbor_normal) = vertex_normals.get(&neighbor_idx) {
                     neighbor_normals.push(neighbor_normal);
                 }
             }
         }
-        
+
         // Edge uniformity (lower standard deviation = more uniform)
         let edge_uniformity = if edge_lengths.len() > 1 {
             let mean_edge = edge_lengths.iter().sum::<Real>() / edge_lengths.len() as Real;
-            let variance = edge_lengths.iter()
+            let variance = edge_lengths
+                .iter()
                 .map(|&len| (len - mean_edge).powi(2))
-                .sum::<Real>() / edge_lengths.len() as Real;
+                .sum::<Real>()
+                / edge_lengths.len() as Real;
             let std_dev = variance.sqrt();
-            
+
             // Normalize to [0,1] where 1 = perfectly uniform
             1.0 / (1.0 + std_dev / mean_edge)
         } else {
             1.0
         };
-        
+
         // Normal variation (lower = more consistent normals)
         let normal_variation = if neighbor_normals.len() > 1 {
             let mut max_angle: Real = 0.0;
             for &neighbor_normal in &neighbor_normals {
-                let angle = self.normal.normalize().dot(&neighbor_normal.normalize()).acos();
+                let angle = self
+                    .normal
+                    .normalize()
+                    .dot(&neighbor_normal.normalize())
+                    .acos();
                 max_angle = max_angle.max(angle);
             }
-            
+
             // Normalize to [0,1] where 1 = perfectly consistent
             1.0 - (max_angle / std::f64::consts::PI).min(1.0)
         } else {
             1.0
         };
-        
+
         // Simple curvature estimation based on normal variation
         let curvature = if !neighbor_normals.is_empty() {
-            let avg_normal = neighbor_normals.iter().fold(Vector3::zeros(), |acc, &n| acc + n) 
-                           / neighbor_normals.len() as Real;
+            let avg_normal = neighbor_normals
+                .iter()
+                .fold(Vector3::zeros(), |acc, &n| acc + n)
+                / neighbor_normals.len() as Real;
             let normal_deviation = (self.normal - avg_normal).norm();
             normal_deviation // Higher = more curved
         } else {
             0.0
         };
-        
+
         (regularity, curvature, edge_uniformity, normal_variation)
     }
 }
@@ -508,14 +513,15 @@ impl VertexCluster {
         }
 
         // Compute centroid position
-        let centroid = vertices.iter().fold(Point3::origin(), |acc, v| {
-            acc + v.pos.coords
-        }) / vertices.len() as Real;
+        let centroid = vertices
+            .iter()
+            .fold(Point3::origin(), |acc, v| acc + v.pos.coords)
+            / vertices.len() as Real;
 
         // Compute average normal
-        let avg_normal = vertices.iter().fold(Vector3::zeros(), |acc, v| {
-            acc + v.normal
-        });
+        let avg_normal = vertices
+            .iter()
+            .fold(Vector3::zeros(), |acc, v| acc + v.normal);
         let normalized_normal = if avg_normal.norm() > Real::EPSILON {
             avg_normal.normalize()
         } else {
@@ -523,7 +529,8 @@ impl VertexCluster {
         };
 
         // Compute bounding radius
-        let radius = vertices.iter()
+        let radius = vertices
+            .iter()
             .map(|v| (v.pos - Point3::from(centroid)).norm())
             .fold(0.0, |a: Real, b| a.max(b));
 

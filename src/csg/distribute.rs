@@ -88,4 +88,4 @@ impl<S: Clone + Debug + Send + Sync> CSG<S> {
             .reduce(|acc, csg| acc.union(&csg))
             .unwrap()
     }
-} 
+}

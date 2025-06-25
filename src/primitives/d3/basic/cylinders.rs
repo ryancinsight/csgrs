@@ -47,8 +47,8 @@
 //!
 //! All shapes maintain proper topology for CSG operations.
 
-use crate::csg::CSG;
 use crate::core::float_types::{EPSILON, Real, TAU};
+use crate::csg::CSG;
 use crate::geometry::Polygon;
 use crate::geometry::Vertex;
 use nalgebra::{Point3, Vector3};
@@ -237,4 +237,4 @@ impl<S: Clone + Debug + Send + Sync> CSG<S> {
 
         CSG::from_polygons(&polygons)
     }
-} 
+}

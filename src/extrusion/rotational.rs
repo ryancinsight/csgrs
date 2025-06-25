@@ -59,14 +59,15 @@
 //!
 //! All operations preserve geometric accuracy and maintain proper topology.
 
-use crate::csg::CSG;
 use crate::core::float_types::{EPSILON, Real};
+use crate::csg::CSG;
 use crate::geometry::Polygon;
 use crate::geometry::Vertex;
-use geo::{Area, LineString, GeometryCollection};
+use geo::{Area, GeometryCollection, LineString};
 use nalgebra::{Point3, Vector3};
 use std::fmt::Debug;
 use std::sync::OnceLock;
+use crate::core::ValidationError;
 
 impl<S: Clone + Debug + Send + Sync> CSG<S> {
     /// **Mathematical Foundation: Surface of Revolution Generation**
@@ -141,9 +142,9 @@ impl<S: Clone + Debug + Send + Sync> CSG<S> {
     ///
     /// **Note**: Only processes 2D geometry in `self.geometry`. 3D polygons are ignored.
     /// Returns CSG with revolution surfaces only (original 2D geometry cleared).
-    pub fn rotate_extrude(&self, angle_degs: Real, segments: usize) -> CSG<S> {
+    pub fn rotate_extrude(&self, angle_degs: Real, segments: usize) -> Result<CSG<S>, ValidationError> {
         if segments < 2 {
-            panic!("rotate_extrude requires at least 2 segments.");
+            return Err(ValidationError::InvalidArguments);
         }
 
         let angle_radians = angle_degs.to_radians();
@@ -176,7 +177,7 @@ impl<S: Clone + Debug + Send + Sync> CSG<S> {
                         &self.metadata,
                         &mut new_polygons,
                     );
-                }
+                },
 
                 geo::Geometry::MultiPolygon(mpoly) => {
                     // Each Polygon inside
@@ -190,22 +191,22 @@ impl<S: Clone + Debug + Send + Sync> CSG<S> {
                             &mut new_polygons,
                         );
                     }
-                }
+                },
 
                 // Ignore lines, points, etc.
-                _ => {}
+                _ => {},
             }
         }
 
         //----------------------------------------------------------------------
         // 3) Return the new CSG:
         //----------------------------------------------------------------------
-        CSG {
+        Ok(CSG {
             polygons: new_polygons,
             geometry: GeometryCollection::default(),
             bounding_box: OnceLock::new(),
             metadata: self.metadata.clone(),
-        }
+        })
     }
 }
 
@@ -224,13 +225,7 @@ fn revolve_and_cap_polygon<S: Clone + Debug + Send + Sync>(
     let ext_ccw = is_ccw(ext_ring);
 
     // (A) side walls
-    revolve_ring(
-        &ext_ring.0,
-        ext_ccw,
-        trig_table,
-        metadata,
-        out_polygons,
-    );
+    revolve_ring(&ext_ring.0, ext_ccw, trig_table, metadata, out_polygons);
 
     // (B) cap(s) if partial revolve
     if do_caps {
@@ -260,13 +255,7 @@ fn revolve_and_cap_polygon<S: Clone + Debug + Send + Sync>(
     // Interior rings (holes)
     for hole in poly2d.interiors() {
         let hole_ccw = is_ccw(hole);
-        revolve_ring(
-            &hole.0,
-            hole_ccw,
-            trig_table,
-            metadata,
-            out_polygons,
-        );
+        revolve_ring(&hole.0, hole_ccw, trig_table, metadata, out_polygons);
     }
 }
 
@@ -393,4 +382,4 @@ fn build_cap_polygon<S: Clone + Send + Sync>(
     // Build the polygon
     let poly = Polygon::new(verts, metadata.clone());
     Some(poly)
-} 
+}

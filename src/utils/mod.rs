@@ -4,4 +4,4 @@
 pub mod flatten_slice;
 
 #[cfg(feature = "image-io")]
-pub mod image; 
+pub mod image;

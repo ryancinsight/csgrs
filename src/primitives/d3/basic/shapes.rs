@@ -40,8 +40,8 @@
 //!
 //! All shapes maintain proper topology for boolean operations and mesh processing.
 
-use crate::csg::CSG;
 use crate::core::float_types::Real;
+use crate::csg::CSG;
 use crate::geometry::Polygon;
 use crate::geometry::Vertex;
 use nalgebra::{Point3, Vector3};
@@ -111,7 +111,7 @@ impl<S: Clone + Debug + Send + Sync> CSG<S> {
     ///
     /// # Parameters
     /// - `width`: X-dimension (≥ 0)
-    /// - `length`: Y-dimension (≥ 0) 
+    /// - `length`: Y-dimension (≥ 0)
     /// - `height`: Z-dimension (≥ 0)
     /// - `metadata`: Optional metadata for all faces
     pub fn cuboid(width: Real, length: Real, height: Real, metadata: Option<S>) -> CSG<S> {
@@ -215,4 +215,4 @@ impl<S: Clone + Debug + Send + Sync> CSG<S> {
     pub fn cube(width: Real, metadata: Option<S>) -> CSG<S> {
         Self::cuboid(width, width, width, metadata)
     }
-} 
+}

@@ -2,8 +2,8 @@
 //!
 //! This module contains the five Platonic solids and other regular polyhedra.
 
-use crate::csg::CSG;
 use crate::core::float_types::Real;
+use crate::csg::CSG;
 use std::fmt::Debug;
 
 impl<S: Clone + Debug + Send + Sync> CSG<S> {
@@ -31,7 +31,7 @@ impl<S: Clone + Debug + Send + Sync> CSG<S> {
             .iter()
             .map(|&[x, y, z]| [x * radius, y * radius, z * radius])
             .collect();
-        Self::polyhedron(&scaled, &faces, metadata)
+        Self::polyhedron(&scaled, &faces, metadata).unwrap()
     }
 
     /// Regular icosahedron scaled by `radius`
@@ -87,6 +87,8 @@ impl<S: Clone + Debug + Send + Sync> CSG<S> {
 
         let faces_vec: Vec<Vec<usize>> = faces.iter().map(|f| f.to_vec()).collect();
 
-        Self::polyhedron(&pts, &faces_vec, metadata).scale(factor, factor, factor)
+        Self::polyhedron(&pts, &faces_vec, metadata)
+            .unwrap()
+            .scale(factor, factor, factor)
     }
-} 
+}

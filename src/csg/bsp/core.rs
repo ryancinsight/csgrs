@@ -48,10 +48,10 @@ impl<S: Clone + Send + Sync + Debug> Node<S> {
         match (&mut self.front, &mut self.back) {
             (Some(front_node), Some(back_node)) => {
                 join(|| front_node.invert(), || back_node.invert());
-            }
+            },
             (Some(front_node), None) => front_node.invert(),
             (None, Some(back_node)) => back_node.invert(),
-            (None, None) => {}
+            (None, None) => {},
         }
 
         #[cfg(not(feature = "parallel"))]
@@ -74,14 +74,14 @@ impl<S: Clone + Send + Sync + Debug> Node<S> {
 
         while let Some(node) = stack.pop() {
             result.extend_from_slice(&node.polygons);
-            
+
             // Use iterator to add child nodes more efficiently
             stack.extend(
                 [&node.front, &node.back]
                     .iter()
-                    .filter_map(|child| child.as_ref().map(|boxed| boxed.as_ref()))
+                    .filter_map(|child| child.as_ref().map(|boxed| boxed.as_ref())),
             );
         }
         result
     }
-} 
+}

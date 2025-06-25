@@ -46,8 +46,8 @@
 //! All operations preserve geometric accuracy and maintain proper topology
 //! for subsequent CSG operations and mesh processing.
 
-use crate::csg::CSG;
 use crate::core::float_types::{EPSILON, Real};
+use crate::csg::CSG;
 use crate::geometry::Polygon;
 use crate::geometry::Vertex;
 use geo::CoordsIter;
@@ -300,4 +300,4 @@ fn extrude_geometry<S: Clone + Send + Sync>(
         // Other geometry types (LineString, Point, etc.) are skipped or could be handled differently:
         _ => { /* skip */ },
     }
-} 
+}

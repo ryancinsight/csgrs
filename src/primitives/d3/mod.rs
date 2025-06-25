@@ -5,8 +5,8 @@
 
 pub mod basic;
 pub mod complex;
-pub mod specialized;
-pub mod platonic;
 pub mod gears;
+pub mod platonic;
+pub mod specialized;
 
-// Note: impl blocks cannot be re-exported, they are automatically available when modules are included 
+// Note: impl blocks cannot be re-exported, they are automatically available when modules are included

@@ -1,7 +1,7 @@
 //! Create `CSG`s by meshing signed distance fields ([sdf](https://en.wikipedia.org/wiki/Signed_distance_function)) within a bounding box.
 
-use crate::csg::CSG;
 use crate::core::float_types::Real;
+use crate::csg::CSG;
 use crate::geometry::Polygon;
 use crate::geometry::Vertex;
 use fast_surface_nets::{SurfaceNetsBuffer, surface_nets};
@@ -70,7 +70,7 @@ impl<S: Clone + Debug + Send + Sync> CSG<S> {
         }
 
         // Sample the SDF at each grid cell with optimized iteration pattern:
-        // **Mathematical Foundation**: For SDF f(p), we sample at regular intervals 
+        // **Mathematical Foundation**: For SDF f(p), we sample at regular intervals
         // and store (f(p) - iso_value) so surface_nets finds zero-crossings at iso_value.
         // **Optimization**: Linear memory access pattern with better cache locality.
         for i in 0..(nx * ny * nz) {
@@ -78,14 +78,14 @@ impl<S: Clone + Debug + Send + Sync> CSG<S> {
             let remainder = i % (nx * ny);
             let iy = remainder / nx;
             let ix = remainder % nx;
-            
+
             let xf = min_pt.x + (ix as Real) * dx;
             let yf = min_pt.y + (iy as Real) * dy;
             let zf = min_pt.z + (iz as Real) * dz;
-            
+
             let p = Point3::new(xf, yf, zf);
             let sdf_val = sdf(&p);
-            
+
             // Robust finite value handling with mathematical correctness
             field_values[i as usize] = if sdf_val.is_finite() {
                 (sdf_val - iso_value) as f32
@@ -186,19 +186,23 @@ impl<S: Clone + Debug + Send + Sync> CSG<S> {
             let n0 = sn_buffer.normals[i0];
             let n1 = sn_buffer.normals[i1];
             let n2 = sn_buffer.normals[i2];
-            
-            // Normals come out as [f32;3] – promote to `Real`
-			let n0v = Vector3::new(n0[0] as Real, n0[1] as Real, n0[2] as Real);
-			let n1v = Vector3::new(n1[0] as Real, n1[1] as Real, n1[2] as Real);
-			let n2v = Vector3::new(n2[0] as Real, n2[1] as Real, n2[2] as Real);
 
-			// ── « gate » ────────────────────────────────────────────────
-			if !(point_finite(&p0) && point_finite(&p1) && point_finite(&p2)
-				&& vec_finite(&n0v) && vec_finite(&n1v) && vec_finite(&n2v))
-			{
-				// at least one coordinate was NaN/±∞ – ignore this triangle
-				continue;
-			}
+            // Normals come out as [f32;3] – promote to `Real`
+            let n0v = Vector3::new(n0[0] as Real, n0[1] as Real, n0[2] as Real);
+            let n1v = Vector3::new(n1[0] as Real, n1[1] as Real, n1[2] as Real);
+            let n2v = Vector3::new(n2[0] as Real, n2[1] as Real, n2[2] as Real);
+
+            // ── « gate » ────────────────────────────────────────────────
+            if !(point_finite(&p0)
+                && point_finite(&p1)
+                && point_finite(&p2)
+                && vec_finite(&n0v)
+                && vec_finite(&n1v)
+                && vec_finite(&n2v))
+            {
+                // at least one coordinate was NaN/±∞ – ignore this triangle
+                continue;
+            }
 
             let v0 =
                 Vertex::new(p0, Vector3::new(n0[0] as Real, n0[1] as Real, n0[2] as Real));

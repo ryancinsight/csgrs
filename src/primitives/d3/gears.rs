@@ -2,8 +2,8 @@
 //!
 //! This module contains various types of gears including involute, cycloid, and helical gears.
 
-use crate::csg::CSG;
 use crate::core::float_types::Real;
+use crate::csg::CSG;
 use std::fmt::Debug;
 
 impl<S: Clone + Debug + Send + Sync> CSG<S> {
@@ -91,4 +91,4 @@ impl<S: Clone + Debug + Send + Sync> CSG<S> {
         }
         acc
     }
-} 
+}

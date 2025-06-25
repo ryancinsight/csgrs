@@ -3,32 +3,29 @@
 //! This module provides functions for generating sophisticated 2D curves including
 //! NACA airfoils, Bézier curves, and B-splines.
 
-use crate::csg::CSG;
 use crate::core::float_types::{EPSILON, Real};
+use crate::csg::CSG;
 use geo::{
-    Geometry, GeometryCollection, LineString, Orient,
-    Polygon as GeoPolygon, orient::Direction,
+    Geometry, GeometryCollection, LineString, Orient, Polygon as GeoPolygon, orient::Direction,
 };
 use std::fmt::Debug;
 
 impl<S: Clone + Debug + Send + Sync> CSG<S> {
     /// Generate a NACA 4-digit series airfoil profile.
-    /// 
+    ///
     /// # Parameters
     /// - `code`: 4-digit NACA code (e.g., "2412")
     /// - `chord`: chord length of the airfoil
     /// - `samples`: number of sample points per surface (upper/lower)
     /// - `metadata`: optional metadata
-    /// 
+    ///
     /// # Example
     /// ```
     /// use csgrs::CSG;
     /// let airfoil: CSG<()> = CSG::airfoil("2412", 1.0, 50, None);
     /// ```
     pub fn airfoil(code: &str, chord: Real, samples: usize, metadata: Option<S>) -> CSG<S>
-    where
-        S: Clone + Send + Sync,
-    {
+    where S: Clone + Send + Sync {
         assert!(
             code.len() == 4 && code.chars().all(|c| c.is_ascii_digit()),
             "NACA code must be exactly 4 digits"
@@ -113,7 +110,11 @@ impl<S: Clone + Debug + Send + Sync> CSG<S> {
         }
 
         // de Casteljau evaluator -------------------------------------------------
-        fn de_casteljau(ctrl: &[[Real; 2]], t: Real, tmp: &mut Vec<(Real, Real)>) -> (Real, Real) {
+        fn de_casteljau(
+            ctrl: &[[Real; 2]],
+            t: Real,
+            tmp: &mut Vec<(Real, Real)>,
+        ) -> (Real, Real) {
             tmp.clear();
             tmp.extend(ctrl.iter().map(|&[x, y]| (x, y)));
             let n = tmp.len();
@@ -240,4 +241,4 @@ impl<S: Clone + Debug + Send + Sync> CSG<S> {
         let poly_2d = GeoPolygon::new(LineString::from(pts), vec![]);
         CSG::from_geo(GeometryCollection(vec![Geometry::Polygon(poly_2d)]), metadata)
     }
-} 
+}

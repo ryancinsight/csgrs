@@ -9,8 +9,8 @@
 #![cfg_attr(doc, doc = doc_image_embed::embed_image!("Pre-ConvexHull demo image", "docs/convex_hull_before_nobackground.png"))]
 #![cfg_attr(doc, doc = doc_image_embed::embed_image!("ConvexHull demo image", "docs/convex_hull_nobackground.png"))]
 
-use crate::csg::CSG;
 use crate::core::float_types::Real;
+use crate::csg::CSG;
 use crate::geometry::Polygon;
 use crate::geometry::Vertex;
 use chull::ConvexHullWrapper;
@@ -27,7 +27,8 @@ impl<S: Clone + Debug + Send + Sync> CSG<S> {
             .flat_map(|poly| poly.vertices.iter().map(|v| v.pos))
             .collect();
 
-        let points_for_hull: Vec<Vec<Real>> = points.iter().map(|p| vec![p.x, p.y, p.z]).collect();
+        let points_for_hull: Vec<Vec<Real>> =
+            points.iter().map(|p| vec![p.x, p.y, p.z]).collect();
 
         // Attempt to compute the convex hull using the robust wrapper
         let hull = match ConvexHullWrapper::try_new(&points_for_hull, None) {
@@ -99,10 +100,8 @@ impl<S: Clone + Debug + Send + Sync> CSG<S> {
         }
 
         // Convert to format expected by hull library
-        let points_for_hull: Vec<Vec<Real>> = sum_points
-            .iter()
-            .map(|p| vec![p.x, p.y, p.z])
-            .collect();
+        let points_for_hull: Vec<Vec<Real>> =
+            sum_points.iter().map(|p| vec![p.x, p.y, p.z]).collect();
 
         // Compute convex hull with proper error handling
         let hull = match ConvexHullWrapper::try_new(&points_for_hull, None) {
@@ -119,16 +118,16 @@ impl<S: Clone + Debug + Send + Sync> CSG<S> {
                 let v0 = &verts[tri[0]];
                 let v1 = &verts[tri[1]];
                 let v2 = &verts[tri[2]];
-                
+
                 let p0 = Point3::new(v0[0], v0[1], v0[2]);
                 let p1 = Point3::new(v1[0], v1[1], v1[2]);
                 let p2 = Point3::new(v2[0], v2[1], v2[2]);
-                
+
                 // Calculate proper normal vector using cross product
                 let edge1 = p1 - p0;
                 let edge2 = p2 - p0;
                 let normal = edge1.cross(&edge2);
-                
+
                 // Filter out degenerate triangles
                 if normal.norm_squared() > Real::EPSILON {
                     let normalized_normal = normal.normalize();

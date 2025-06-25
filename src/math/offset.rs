@@ -26,7 +26,7 @@
 //! - **Sharp**: Use angular joints (C⁰ continuity)
 //!
 //! ## **Algorithm Implementation**
-//! 
+//!
 //! This implementation uses the `geo-buf` crate which provides:
 //! - **Robust intersection handling**: Resolves self-intersections
 //! - **Topological correctness**: Maintains polygon validity
@@ -42,10 +42,12 @@
 //! All operations preserve the 3D polygon structure while applying 2D offsetting
 //! to the planar projections stored in the geometry collection.
 
-use crate::csg::CSG;
 use crate::core::float_types::Real;
+use crate::csg::CSG;
 use geo::{Geometry, GeometryCollection};
-use geo_buf::{buffer_multi_polygon, buffer_polygon, buffer_polygon_rounded, buffer_multi_polygon_rounded};
+use geo_buf::{
+    buffer_multi_polygon, buffer_multi_polygon_rounded, buffer_polygon, buffer_polygon_rounded,
+};
 use std::fmt::Debug;
 use std::sync::OnceLock;
 

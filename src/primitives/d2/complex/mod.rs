@@ -15,4 +15,4 @@ pub use decorative::*;
 #[allow(unused_imports)]
 pub use functional::*;
 #[allow(unused_imports)]
-pub use parametric::*; 
+pub use parametric::*;

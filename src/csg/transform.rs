@@ -55,11 +55,13 @@ impl<S: Clone + Debug + Send + Sync> CSG<S> {
         let mat_inv_transpose = match mat.try_inverse() {
             Some(inv) => inv.transpose(),
             None => {
-                eprintln!("Warning: Transformation matrix is not invertible, using identity for normals");
+                eprintln!(
+                    "Warning: Transformation matrix is not invertible, using identity for normals"
+                );
                 Matrix4::identity()
-            }
+            },
         };
-        
+
         let mut csg = self.clone();
 
         for poly in &mut csg.polygons {
@@ -69,9 +71,11 @@ impl<S: Clone + Debug + Send + Sync> CSG<S> {
                 match Point3::from_homogeneous(hom_pos) {
                     Some(transformed_pos) => vert.pos = transformed_pos,
                     None => {
-                        eprintln!("Warning: Invalid homogeneous coordinates after transformation, skipping vertex");
+                        eprintln!(
+                            "Warning: Invalid homogeneous coordinates after transformation, skipping vertex"
+                        );
                         continue;
-                    }
+                    },
                 }
 
                 // Transform normal using inverse transpose rule
@@ -121,13 +125,11 @@ impl<S: Clone + Debug + Send + Sync> CSG<S> {
     }
 
     /// Returns a new CSG translated by x, y, and z.
-    ///
     pub fn translate(&self, x: Real, y: Real, z: Real) -> CSG<S> {
         self.translate_vector(Vector3::new(x, y, z))
     }
 
     /// Returns a new CSG translated by vector.
-    ///
     pub fn translate_vector(&self, vector: Vector3<Real>) -> CSG<S> {
         let translation = Translation3::from(vector);
 
@@ -260,4 +262,4 @@ impl<S: Clone + Debug + Send + Sync> CSG<S> {
         // Apply to all polygons
         self.transform(&mirror_mat).inverse()
     }
-} 
+}

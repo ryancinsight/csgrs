@@ -1,7 +1,7 @@
 //! Create `CSG`s using Hershey fonts
 
-use crate::csg::CSG;
 use crate::core::float_types::Real;
+use crate::csg::CSG;
 use hershey::{Font, Glyph as HersheyGlyph, Vector as HersheyVector};
 use std::fmt::Debug;
 use std::sync::OnceLock;
@@ -20,7 +20,6 @@ impl<S: Clone + Debug + Send + Sync> CSG<S> {
     ///
     /// # Returns
     /// A new `CSG` where each glyph stroke is a `Geometry::LineString` in `geometry`.
-    ///
     pub fn from_hershey(text: &str, font: &Font, size: Real, metadata: Option<S>) -> CSG<S> {
         use geo::{Geometry, GeometryCollection};
 

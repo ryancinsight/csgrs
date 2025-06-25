@@ -39,11 +39,10 @@
 //!
 //! All shapes are generated in the XY plane (z=0) for subsequent 3D operations.
 
-use crate::csg::CSG;
 use crate::core::float_types::{PI, Real, TAU};
+use crate::csg::CSG;
 use geo::{
-    coord, Geometry, GeometryCollection, LineString,
-    Polygon as GeoPolygon, line_string,
+    Geometry, GeometryCollection, LineString, Polygon as GeoPolygon, coord, line_string,
 };
 use std::fmt::Debug;
 
@@ -152,7 +151,11 @@ impl<S: Clone + Debug + Send + Sync> CSG<S> {
 
     /// Right triangle from (0,0) to (width,0) to (0,height).
     pub fn right_triangle(width: Real, height: Real, metadata: Option<S>) -> Self {
-        let line_string = LineString::new(vec![coord!{x: 0.0, y: 0.0}, coord!{x: width, y: 0.0}, coord!{x: 0.0, y: height}]);
+        let line_string = LineString::new(vec![
+            coord! {x: 0.0, y: 0.0},
+            coord! {x: width, y: 0.0},
+            coord! {x: 0.0, y: height},
+        ]);
         let polygon = GeoPolygon::new(line_string, vec![]);
         CSG::from_geo(GeometryCollection(vec![Geometry::Polygon(polygon)]), metadata)
     }
@@ -343,4 +346,4 @@ impl<S: Clone + Debug + Send + Sync> CSG<S> {
             metadata,
         )
     }
-} 
+}
