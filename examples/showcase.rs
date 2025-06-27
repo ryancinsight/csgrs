@@ -7,6 +7,7 @@ use csgrs::Real;
 use csgrs::geometry::Plane;
 use nalgebra::{Point3, Vector3};
 use std::fs;
+use std::time::Instant;
 
 #[cfg(feature = "image")]
 use image::{GrayImage, ImageBuffer};
@@ -66,7 +67,8 @@ fn main() {
 
     // 3) Boolean operations: Union, Subtract, Intersect
     let base_cube = CSG::cube(3.0, None).center();
-    let tool_sphere = CSG::sphere(2.0, 32, 16, None);
+    // Reduced resolution for tool_sphere to simplify subsequent operations
+    let tool_sphere = CSG::sphere(2.0, 8, 4, None);
 
     let union_shape = base_cube.union(&tool_sphere);
     #[cfg(feature = "stl-io")]
@@ -504,29 +506,40 @@ fn main() {
     // Let's reuse the `cube` from above:
     #[cfg(feature = "stl-io")]
     {
-        let gyroid_inside_cube = hull_of_union
-            .scale(20.0, 20.0, 20.0)
-            .gyroid(64, 2.0, 0.0, None);
+        println!("Starting TPMS generation with potentially simplified hull_of_union...");
+        let now = Instant::now();
+        // Attempt to use the hull_of_union, which should now be simpler
+        let scaled_hull = hull_of_union.scale(20.0, 20.0, 20.0);
+        println!("Time to scale hull_of_union: {:?}", now.elapsed());
+
+        let now = Instant::now();
+        let _bounding_box = scaled_hull.bounding_box();
+        println!("Time to calculate bounding_box for scaled_hull: {:?}", now.elapsed());
+
+        let now = Instant::now();
+        let gyroid_inside_cube = scaled_hull.gyroid(64, 2.0, 0.0, None);
+        println!("Time to generate gyroid: {:?}", now.elapsed());
         let _ = fs::write(
             format!("{}/08-implicit-surfaces/gyroid_cube.stl", out_dir),
             gyroid_inside_cube.to_stl_binary("gyroid_cube").unwrap(),
         );
 
-        let schwarzp_inside_cube = hull_of_union
-            .scale(20.0, 20.0, 20.0)
-            .schwarz_p(64, 2.0, 0.0, None);
+        let now = Instant::now();
+        let schwarzp_inside_cube = scaled_hull.schwarz_p(64, 2.0, 0.0, None);
+        println!("Time to generate schwarz_p: {:?}", now.elapsed());
         let _ = fs::write(
             format!("{}/08-implicit-surfaces/schwarz_p_cube.stl", out_dir),
             schwarzp_inside_cube.to_stl_binary("schwarz_p_cube").unwrap(),
         );
 
-        let schwarzd_inside_cube = hull_of_union
-            .scale(20.0, 20.0, 20.0)
-            .schwarz_d(64, 2.0, 0.0, None);
+        let now = Instant::now();
+        let schwarzd_inside_cube = scaled_hull.schwarz_d(64, 2.0, 0.0, None);
+        println!("Time to generate schwarz_d: {:?}", now.elapsed());
         let _ = fs::write(
             format!("{}/08-implicit-surfaces/schwarz_d_cube.stl", out_dir),
             schwarzd_inside_cube.to_stl_binary("schwarz_d_cube").unwrap(),
         );
+        println!("Finished TPMS generation.");
     }
 
     // Define the start point and the arrow direction vector.
