@@ -6,7 +6,7 @@ use crate::geometry::{BACK, COPLANAR, FRONT, Plane, Polygon, SPANNING, Vertex};
 use std::fmt::Debug;
 
 impl<S: Clone + Send + Sync + Debug> Node<S> {
-    fn pick_best_splitting_plane(&self, polygons: &[Polygon<S>]) -> Plane {
+    pub(super) fn pick_best_splitting_plane(&self, polygons: &[Polygon<S>]) -> Plane {
         const K_SPANS: Real = 8.0; // Weight for spanning polygons
         const K_BALANCE: Real = 1.0; // Weight for front/back balance
 

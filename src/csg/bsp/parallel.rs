@@ -10,132 +10,134 @@ use std::fmt::Debug;
 
 #[cfg(feature = "parallel")]
 impl<S: Clone + Send + Sync + Debug> Node<S> {
-    /// Build a BSP tree from the given polygons (parallel version)
+    /// Parallel version of `build`.
     pub fn build_parallel(&mut self, polygons: &[Polygon<S>]) {
         if polygons.is_empty() {
             return;
         }
 
-        // Choose splitting plane if not already set
         if self.plane.is_none() {
-            self.plane = Some(polygons[0].plane.clone());
+            self.plane = Some(self.pick_best_splitting_plane(polygons));
         }
-        let plane = self.plane.clone().unwrap();
+        let plane = self.plane.as_ref().unwrap();
 
-        // Split polygons in parallel
-        let (mut coplanar_front, mut coplanar_back, front, back) =
-            polygons.par_iter().map(|p| plane.split_polygon(p)).reduce(
-                || (Vec::new(), Vec::new(), Vec::new(), Vec::new()),
-                |mut acc, x| {
-                    acc.0.extend(x.0);
-                    acc.1.extend(x.1);
-                    acc.2.extend(x.2);
-                    acc.3.extend(x.3);
-                    acc
-                },
-            );
+        let mut front_polys = Vec::with_capacity(polygons.len() / 2);
+        let mut back_polys = Vec::with_capacity(polygons.len() / 2);
 
-        // Append coplanar fronts/backs to self.polygons
-        self.polygons.append(&mut coplanar_front);
-        self.polygons.append(&mut coplanar_back);
+        // Process polygons sequentially for deterministic behavior
+        for polygon in polygons {
+            let (coplanar_front, coplanar_back, mut front_parts, mut back_parts) =
+                plane.split_polygon(polygon);
 
-        // Recursively build front/back in parallel
-        if let (Some(front_node), Some(back_node)) = (&mut self.front, &mut self.back) {
-            join(|| front_node.build(&front), || back_node.build(&back));
-        } else {
-            if let Some(front_node) = &mut self.front {
-                front_node.build(&front);
-            }
-            if let Some(back_node) = &mut self.back {
-                back_node.build(&back);
-            }
+            self.polygons.extend(coplanar_front);
+            self.polygons.extend(coplanar_back);
+            front_polys.append(&mut front_parts);
+            back_polys.append(&mut back_parts);
         }
+
+        // Parallelize the recursive building of child nodes
+        rayon::join(
+            || {
+                if !front_polys.is_empty() {
+                    let mut front_node = Box::new(Node::new());
+                    front_node.build_parallel(&front_polys);
+                    self.front = Some(front_node);
+                }
+            },
+            || {
+                if !back_polys.is_empty() {
+                    let mut back_node = Box::new(Node::new());
+                    back_node.build_parallel(&back_polys);
+                    self.back = Some(back_node);
+                }
+            },
+        );
     }
 
-    /// Recursively remove all polygons in `polygons` that are inside this BSP tree (parallel version)
+    /// Parallel version of `clip_polygons`.
     pub fn clip_polygons_parallel(&self, polygons: &[Polygon<S>]) -> Vec<Polygon<S>> {
-        // If this node has no plane, just return the original set
         if self.plane.is_none() {
             return polygons.to_vec();
         }
         let plane = self.plane.as_ref().unwrap();
 
-        // Split each polygon in parallel; gather results
-        let (coplanar_front, coplanar_back, mut front, mut back) = polygons
-            .par_iter()
-            .map(|poly| plane.split_polygon(poly))
-            .reduce(
-                || (Vec::new(), Vec::new(), Vec::new(), Vec::new()),
-                |mut acc, x| {
-                    acc.0.extend(x.0);
-                    acc.1.extend(x.1);
-                    acc.2.extend(x.2);
-                    acc.3.extend(x.3);
-                    acc
-                },
-            );
+        let mut front_polys = Vec::with_capacity(polygons.len());
+        let mut back_polys = Vec::with_capacity(polygons.len());
 
-        // Decide where to send the coplanar polygons
-        for cp in coplanar_front {
-            if plane.orient_plane(&cp.plane) == FRONT {
-                front.push(cp);
-            } else {
-                back.push(cp);
-            }
-        }
-        for cp in coplanar_back {
-            if plane.orient_plane(&cp.plane) == FRONT {
-                front.push(cp);
-            } else {
-                back.push(cp);
-            }
-        }
+        // Process polygons sequentially for deterministic behavior
+        for polygon in polygons {
+            let (coplanar_front, coplanar_back, mut front_parts, mut back_parts) =
+                plane.split_polygon(polygon);
 
-        // Recursively clip front & back in parallel
-        let (front_clipped, back_clipped) = join(
-            || {
-                if let Some(ref f) = self.front {
-                    f.clip_polygons(&front)
+            for coplanar_poly in coplanar_front.into_iter().chain(coplanar_back.into_iter()) {
+                if plane.orient_plane(&coplanar_poly.plane) == FRONT {
+                    front_parts.push(coplanar_poly);
                 } else {
-                    front
+                    back_parts.push(coplanar_poly);
+                }
+            }
+            front_polys.append(&mut front_parts);
+            back_polys.append(&mut back_parts);
+        }
+
+        // Parallelize the recursive clipping
+        let (mut front_clipped, back_clipped) = rayon::join(
+            || {
+                if let Some(ref front_node) = self.front {
+                    front_node.clip_polygons_parallel(&front_polys)
+                } else {
+                    front_polys
                 }
             },
             || {
-                if let Some(ref b) = self.back {
-                    b.clip_polygons(&back)
+                if let Some(ref back_node) = self.back {
+                    back_node.clip_polygons_parallel(&back_polys)
                 } else {
-                    // If there's no back node, discard these polygons
                     Vec::new()
                 }
             },
         );
 
-        // Combine front and back
-        let mut result = front_clipped;
-        result.extend(back_clipped);
-        result
+        front_clipped.extend(back_clipped);
+        front_clipped
     }
 
-    /// Remove all polygons in this BSP tree that are inside the other BSP tree (parallel version)
+    /// Parallel version of `clip_to`.
     pub fn clip_to_parallel(&mut self, bsp: &Node<S>) {
-        // clip self.polygons in parallel
-        let new_polygons = bsp.clip_polygons(&self.polygons);
-        self.polygons = new_polygons;
+        // The clipping of polygons can be done in parallel for different nodes.
+        let (polygons, front_opt, back_opt) =
+            (std::mem::take(&mut self.polygons), self.front.take(), self.back.take());
 
-        // Recurse in parallel over front/back
-        if let (Some(front_node), Some(back_node)) = (&mut self.front, &mut self.back) {
-            join(|| front_node.clip_to(bsp), || back_node.clip_to(bsp));
-        } else {
-            if let Some(front_node) = &mut self.front {
-                front_node.clip_to(bsp);
-            }
-            if let Some(back_node) = &mut self.back {
-                back_node.clip_to(bsp);
-            }
-        }
+        let (clipped_polygons, (clipped_front, clipped_back)) = rayon::join(
+            || bsp.clip_polygons_parallel(&polygons),
+            || {
+                rayon::join(
+                    || {
+                        if let Some(mut front) = front_opt {
+                            front.clip_to_parallel(bsp);
+                            Some(front)
+                        } else {
+                            None
+                        }
+                    },
+                    || {
+                        if let Some(mut back) = back_opt {
+                            back.clip_to_parallel(bsp);
+                            Some(back)
+                        } else {
+                            None
+                        }
+                    },
+                )
+            },
+        );
+
+        self.polygons = clipped_polygons;
+        self.front = clipped_front;
+        self.back = clipped_back;
     }
 
-    /// Slices this BSP node with `slicing_plane` (parallel version)
+    /// Parallel version of `slice`.
     pub fn slice_parallel(
         &self,
         slicing_plane: &Plane,
