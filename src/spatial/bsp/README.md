@@ -1,0 +1,242 @@
+# Binary Space Partitioning (BSP) Trees
+
+## Overview
+
+This module provides a high-performance, modular implementation of [Binary Space Partitioning (BSP) trees](https://en.wikipedia.org/wiki/Binary_space_partitioning) for 3D geometric operations. BSP trees recursively partition 3D space using hyperplanes, enabling efficient Boolean operations, visibility determination, and spatial queries.
+
+## Mathematical Foundation
+
+### Core Concept
+
+A BSP tree recursively divides 3D space using hyperplanes (splitting planes). Each node in the tree represents a region of space, with polygons classified relative to the splitting plane as:
+
+- **FRONT**: Polygons entirely in the positive half-space
+- **BACK**: Polygons entirely in the negative half-space  
+- **COPLANAR**: Polygons lying exactly on the plane
+- **SPANNING**: Polygons crossing the plane (split into FRONT and BACK parts)
+
+### Algorithm Complexity
+
+- **Construction**: O(n log n) expected time for balanced trees, O(n²) worst case
+- **Queries**: O(log d) where d is tree depth
+- **Space**: O(n) for n polygons
+
+## Module Structure
+
+```
+src/spatial/bsp/
+├── mod.rs           # Module declarations and re-exports
+├── README.md        # This documentation
+├── core.rs          # Node structure and basic operations
+├── operations.rs    # Non-parallel complex operations
+└── parallel.rs      # Parallel implementations (requires "parallel" feature)
+```
+
+## Core API
+
+### Node Structure
+
+```rust
+pub struct Node<S: Clone> {
+    pub plane: Option<Plane>,           // Splitting plane
+    pub front: Option<Box<Node<S>>>,    // Front subtree
+    pub back: Option<Box<Node<S>>>,     // Back subtree
+    pub polygons: Vec<Polygon<S>>,      // Coplanar polygons
+}
+```
+
+### Basic Operations
+
+#### Creating BSP Trees
+
+```rust
+use csgrs::spatial::bsp::Node;
+use csgrs::geometry::Polygon;
+
+// Create empty tree
+let mut bsp = Node::new();
+
+// Build from polygons
+bsp.build(&polygons);
+
+// Or create directly
+let bsp = Node::from_polygons(&polygons);
+```
+
+#### Tree Inversion
+
+```rust
+// Invert all polygons and flip tree structure
+bsp.invert();
+```
+
+#### Polygon Extraction
+
+```rust
+// Get all polygons from the tree
+let all_polygons = bsp.all_polygons();
+```
+
+## Advanced Operations
+
+### Clipping Operations
+
+Clipping removes polygons that are inside the BSP tree:
+
+```rust
+// Remove polygons inside the BSP tree
+let clipped = bsp.clip_polygons(&input_polygons);
+
+// Clip this tree against another BSP tree
+bsp.clip_to(&other_bsp);
+```
+
+**Mathematical Foundation**: Uses plane classification to determine polygon visibility. Polygons entirely in BACK half-space are clipped (removed).
+
+### Slicing Operations
+
+Slicing extracts geometry at the intersection with a plane:
+
+```rust
+use csgrs::geometry::Plane;
+
+let slicing_plane = Plane::new(normal, offset);
+let (coplanar_polygons, intersection_edges) = bsp.slice(&slicing_plane);
+```
+
+Returns:
+- **Coplanar polygons**: Polygons lying exactly on the slicing plane
+- **Intersection edges**: Line segments where spanning polygons cross the plane
+
+## Performance Optimization
+
+### Automatic Method Selection
+
+The BSP implementation automatically chooses between parallel and sequential algorithms:
+
+```rust
+// Automatically selects best implementation
+let clipped = bsp.clip_polygons_auto(&polygons);
+let (coplanar, edges) = bsp.slice_auto(&plane);
+bsp.clip_to_auto(&other_bsp);
+```
+
+### Parallel Processing
+
+Enable the `parallel` feature for multi-threaded operations:
+
+```toml
+[dependencies]
+csgrs = { version = "0.19", features = ["parallel"] }
+```
+
+```rust
+// Explicit parallel operations (requires "parallel" feature)
+bsp.build_parallel(&polygons);
+let clipped = bsp.clip_polygons_parallel(&polygons);
+```
+
+**Performance Thresholds**:
+- Parallel build: > 100 polygons
+- Parallel clipping: > 50 polygons
+- Parallel slicing: > 50 polygons
+
+### Memory Optimization
+
+- **Lazy Initialization**: Child nodes created only when needed
+- **Pre-allocation**: Vectors sized based on input estimates
+- **Iterator Patterns**: Efficient polygon processing without unnecessary copies
+
+## Usage Examples
+
+### CSG Boolean Operations
+
+```rust
+use csgrs::{CSG, spatial::bsp::Node};
+
+// Create CSG objects
+let cube: CSG<()> = CSG::cube(10.0, None);
+let sphere: CSG<()> = CSG::sphere(6.0, 16, 8, None);
+
+// Convert to BSP trees for Boolean operations
+let mut cube_bsp = Node::from_polygons(&cube.polygons);
+let mut sphere_bsp = Node::from_polygons(&sphere.polygons);
+
+// Perform union: A ∪ B = A + (B - A)
+sphere_bsp.clip_to(&cube_bsp);
+cube_bsp.clip_to(&sphere_bsp);
+sphere_bsp.invert();
+cube_bsp.clip_to(&sphere_bsp);
+sphere_bsp.invert();
+
+// Combine results
+let mut result_polygons = cube_bsp.all_polygons();
+result_polygons.extend(sphere_bsp.all_polygons());
+```
+
+### Visibility Determination
+
+```rust
+// Check if polygons are visible from a viewpoint
+let view_plane = Plane::from_point_normal(viewpoint, view_direction);
+let mut visibility_bsp = Node::new();
+visibility_bsp.build(&scene_polygons);
+
+let visible_polygons = visibility_bsp.clip_polygons(&query_polygons);
+```
+
+### Cross-Section Analysis
+
+```rust
+// Extract cross-section at a specific plane
+let section_plane = Plane::new(Vector3::z(), 0.0); // XY plane at Z=0
+let (section_polygons, intersection_edges) = bsp.slice(&section_plane);
+
+// Convert to 2D for further processing
+let section_2d = convert_to_2d(&section_polygons, &intersection_edges);
+```
+
+## Best Practices
+
+### Plane Selection
+
+The quality of BSP trees depends heavily on splitting plane selection:
+
+- **Balanced splits**: Prefer planes that divide polygons evenly
+- **Minimize spanning**: Avoid planes that split many polygons
+- **Heuristic scoring**: Uses weighted combination of balance and spanning factors
+
+### Memory Management
+
+- Use `clip_to_auto()` for automatic parallel/sequential selection
+- Consider polygon count when choosing explicit parallel operations
+- Pre-allocate vectors when polygon counts are known
+
+### Error Handling
+
+BSP operations are generally robust, but consider:
+
+- **Degenerate polygons**: Polygons with < 3 vertices are skipped
+- **Numerical precision**: Uses `EPSILON` for floating-point comparisons
+- **Empty inputs**: Operations handle empty polygon lists gracefully
+
+## Integration with CSG Module
+
+While BSP trees are now in the spatial module, they integrate seamlessly with CSG operations:
+
+```rust
+use csgrs::{CSG, BspNode}; // BspNode is re-exported for convenience
+
+// CSG operations use BSP trees internally
+let result = csg1.union(&csg2);
+
+// Direct BSP usage for custom operations
+let bsp = BspNode::from_polygons(&csg1.polygons);
+```
+
+## See Also
+
+- [Wikipedia: Binary Space Partitioning](https://en.wikipedia.org/wiki/Binary_space_partitioning)
+- [`../README.md`](../README.md) - Spatial module overview
+- [`../../ARCHITECTURE.md`](../../ARCHITECTURE.md) - Overall architecture
+- [`../../docs/adr/001-bsp-spatial-module-migration.md`](../../docs/adr/001-bsp-spatial-module-migration.md) - Migration rationale
