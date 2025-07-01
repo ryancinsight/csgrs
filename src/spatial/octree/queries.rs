@@ -42,7 +42,7 @@ impl<S: Clone + Send + Sync + Debug> Node<S> {
 
         // Recursively search children
         for child in &self.children {
-            if let Some(ref child_node) = child {
+            if let Some(child_node) = child {
                 child_node.volume_query_recursive(query_bounds, results);
             }
         }
@@ -95,7 +95,7 @@ impl<S: Clone + Send + Sync + Debug> Node<S> {
             } else {
                 // Single child or no children
                 for child in &self.children {
-                    if let Some(ref child_node) = child {
+                    if let Some(child_node) = child {
                         child_node.volume_query_recursive(query_bounds, results);
                     }
                 }
@@ -103,7 +103,7 @@ impl<S: Clone + Send + Sync + Debug> Node<S> {
         } else {
             // Use sequential for smaller subtrees
             for child in &self.children {
-                if let Some(ref child_node) = child {
+                if let Some(child_node) = child {
                     child_node.volume_query_recursive(query_bounds, results);
                 }
             }
@@ -154,7 +154,7 @@ impl<S: Clone + Send + Sync + Debug> Node<S> {
 
         // Recursively process children
         for child in &self.children {
-            if let Some(ref child_node) = child {
+            if let Some(child_node) = child {
                 child_node.level_of_detail_recursive(viewpoint, detail_threshold, results);
             }
         }
@@ -218,14 +218,14 @@ impl<S: Clone + Send + Sync + Debug> Node<S> {
                 }
             } else {
                 for child in &self.children {
-                    if let Some(ref child_node) = child {
+                    if let Some(child_node) = child {
                         child_node.level_of_detail_recursive(viewpoint, detail_threshold, results);
                     }
                 }
             }
         } else {
             for child in &self.children {
-                if let Some(ref child_node) = child {
+                if let Some(child_node) = child {
                     child_node.level_of_detail_recursive(viewpoint, detail_threshold, results);
                 }
             }
@@ -259,7 +259,7 @@ impl<S: Clone + Send + Sync + Debug> Node<S> {
 
         // Recursively process children
         for child in &self.children {
-            if let Some(ref child_node) = child {
+            if let Some(child_node) = child {
                 child_node.frustum_query_recursive(frustum_planes, results);
             }
         }
@@ -283,7 +283,7 @@ impl<S: Clone + Send + Sync + Debug> Node<S> {
 
             // Add children to stack (prioritize by distance or other criteria)
             for child in &node.children {
-                if let Some(ref child_node) = child {
+                if let Some(child_node) = child {
                     stack.push(child_node.as_ref());
                 }
             }
@@ -324,7 +324,11 @@ impl<S: Clone + Send + Sync + Debug> Node<S> {
         for corner in &corners {
             let mut inside_all_planes = true;
             for plane in frustum_planes {
-                if plane.distance_to_point(corner) < 0.0 {
+                // Calculate signed distance: d = n·p - n·p0 where p0 is a point on the plane
+                let normal = plane.normal();
+                let offset = plane.offset();
+                let signed_distance = normal.dot(&corner.coords) - offset;
+                if signed_distance < 0.0 {
                     inside_all_planes = false;
                     break;
                 }
@@ -343,7 +347,11 @@ impl<S: Clone + Send + Sync + Debug> Node<S> {
         for vertex in &polygon.vertices {
             let mut inside_all_planes = true;
             for plane in frustum_planes {
-                if plane.distance_to_point(&vertex.pos) < 0.0 {
+                // Calculate signed distance: d = n·p - n·p0 where p0 is a point on the plane
+                let normal = plane.normal();
+                let offset = plane.offset();
+                let signed_distance = normal.dot(&vertex.pos.coords) - offset;
+                if signed_distance < 0.0 {
                     inside_all_planes = false;
                     break;
                 }

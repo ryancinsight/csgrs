@@ -1,6 +1,6 @@
 //! KD-tree spatial query operations
 
-use super::core::{Axis, Node};
+use super::core::Node;
 use crate::geometry::Polygon;
 use crate::core::float_types::Real;
 use crate::spatial::traits::{Aabb, Ray, Intersection};
@@ -31,10 +31,10 @@ impl<S: Clone + Send + Sync + Debug> Node<S> {
     }
 
     /// Recursive nearest neighbor search
-    fn nearest_neighbor_recursive(
-        &self,
+    fn nearest_neighbor_recursive<'a>(
+        &'a self,
         query_point: &Point3<Real>,
-        best_polygon: &mut Option<&Polygon<S>>,
+        best_polygon: &mut Option<&'a Polygon<S>>,
         best_distance_squared: &mut Real,
     ) {
         // Check polygons in this node
@@ -59,12 +59,12 @@ impl<S: Clone + Send + Sync + Debug> Node<S> {
         };
 
         // Search the closer child first
-        if let Some(ref child) = first_child {
+        if let Some(child) = first_child {
             child.nearest_neighbor_recursive(query_point, best_polygon, best_distance_squared);
         }
 
         // Check if we need to search the other child
-        if let Some(ref child) = second_child {
+        if let Some(child) = second_child {
             if self.could_contain_closer_point(query_point, *best_distance_squared) {
                 child.nearest_neighbor_recursive(query_point, best_polygon, best_distance_squared);
             }
@@ -73,10 +73,10 @@ impl<S: Clone + Send + Sync + Debug> Node<S> {
 
     /// Parallel recursive nearest neighbor search
     #[cfg(feature = "parallel")]
-    fn nearest_neighbor_recursive_parallel(
-        &self,
+    fn nearest_neighbor_recursive_parallel<'a>(
+        &'a self,
         query_point: &Point3<Real>,
-        best_polygon: &mut Option<&Polygon<S>>,
+        best_polygon: &mut Option<&'a Polygon<S>>,
         best_distance_squared: &mut Real,
     ) {
         // Check polygons in this node
@@ -102,12 +102,12 @@ impl<S: Clone + Send + Sync + Debug> Node<S> {
         };
 
         // Search the closer child first
-        if let Some(ref child) = first_child {
+        if let Some(child) = first_child {
             child.nearest_neighbor_recursive(query_point, best_polygon, best_distance_squared);
         }
 
         // Check if we need to search the other child
-        if let Some(ref child) = second_child {
+        if let Some(child) = second_child {
             if self.could_contain_closer_point(query_point, *best_distance_squared) {
                 child.nearest_neighbor_recursive(query_point, best_polygon, best_distance_squared);
             }
@@ -130,7 +130,7 @@ impl<S: Clone + Send + Sync + Debug> Node<S> {
     }
 
     /// Recursive range query implementation
-    fn range_query_recursive(&self, query_bounds: &Aabb, results: &mut Vec<&Polygon<S>>) {
+    fn range_query_recursive<'a>(&'a self, query_bounds: &Aabb, results: &mut Vec<&'a Polygon<S>>) {
         // Check if this node's bounds intersect with query bounds
         if let Some(ref node_bounds) = self.bounds {
             if !node_bounds.intersects(query_bounds) {
@@ -156,7 +156,7 @@ impl<S: Clone + Send + Sync + Debug> Node<S> {
 
     /// Parallel recursive range query implementation
     #[cfg(feature = "parallel")]
-    fn range_query_recursive_parallel(&self, query_bounds: &Aabb, results: &mut Vec<&Polygon<S>>) {
+    fn range_query_recursive_parallel<'a>(&'a self, query_bounds: &Aabb, results: &mut Vec<&'a Polygon<S>>) {
         // Check if this node's bounds intersect with query bounds
         if let Some(ref node_bounds) = self.bounds {
             if !node_bounds.intersects(query_bounds) {

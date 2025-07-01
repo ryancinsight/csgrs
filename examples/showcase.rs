@@ -9,6 +9,13 @@ use nalgebra::{Point3, Vector3};
 use std::fs;
 use std::time::Instant;
 
+// Import spatial structures for intelligent automation demonstration
+use csgrs::spatial::{
+    SpatialStructureFactory, QueryType, SpatialIndex,
+    SpatialStructureSelector, traits::{Aabb, Ray}
+};
+use csgrs::geometry::{Polygon, Vertex};
+
 #[cfg(feature = "image")]
 use image::{GrayImage, ImageBuffer};
 

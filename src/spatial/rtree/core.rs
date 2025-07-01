@@ -62,7 +62,7 @@ pub struct Node<S: Clone> {
     pub level: usize,
     
     /// Configuration for tree operations
-    config: RTreeConfig,
+    pub config: RTreeConfig,
 }
 
 impl<S: Clone> Node<S> {
@@ -112,7 +112,7 @@ impl<S: Clone> Node<S> {
     /// # Examples
     ///
     /// ```rust
-    /// use csgrs::spatial::rtree::Node;
+    /// use csgrs::spatial::{rtree::Node, SpatialIndex};
     /// use csgrs::geometry::{Polygon, Vertex};
     /// use nalgebra::{Point3, Vector3};
     ///
@@ -136,7 +136,7 @@ impl<S: Clone> Node<S> {
     /// # Examples
     ///
     /// ```rust
-    /// use csgrs::spatial::rtree::{Node, RTreeConfig};
+    /// use csgrs::spatial::{rtree::{Node, RTreeConfig}, SpatialIndex};
     /// use csgrs::geometry::{Polygon, Vertex};
     /// use nalgebra::{Point3, Vector3};
     ///
@@ -164,7 +164,7 @@ impl<S: Clone> Node<S> {
             // Use incremental insertion for small datasets
             let mut tree = Self::with_config(config.clone());
             for polygon in polygons {
-                tree.insert(polygon.clone());
+                tree.insert_rtree(polygon.clone());
             }
             tree
         }
@@ -262,7 +262,7 @@ impl<S: Clone> Node<S> {
     }
     
     /// Update the bounding box to encompass all children or polygons
-    fn update_bounding_box(&mut self) {
+    pub fn update_bounding_box(&mut self) {
         if self.is_leaf {
             if self.polygons.is_empty() {
                 self.bounding_box = None;
@@ -294,8 +294,106 @@ impl<S: Clone> Node<S> {
         // TODO: Implement STR (Sort-Tile-Recursive) bulk loading
         let mut tree = Self::with_config(config.clone());
         for polygon in polygons {
-            tree.insert(polygon.clone());
+            tree.insert_rtree(polygon.clone());
         }
         tree
+    }
+}
+
+impl<S: Clone + Send + Sync + Debug> SpatialIndex<S> for Node<S> {
+    /// Build R-tree from polygons
+    fn build(polygons: &[Polygon<S>]) -> Self where Self: Sized {
+        Self::from_polygons(polygons)
+    }
+
+    /// Create empty R-tree
+    fn new() -> Self where Self: Sized {
+        Self::new()
+    }
+
+    /// Check if a point is contained within the tree's bounding box
+    fn contains_point(&self, point: &Point3<Real>) -> bool {
+        if let Some(ref bounds) = self.bounding_box {
+            crate::spatial::utils::bounds_contains_point(bounds, point)
+        } else {
+            false
+        }
+    }
+
+    /// Query polygons within a bounding box
+    fn query_range(&self, bounds: &Aabb) -> Vec<&Polygon<S>> {
+        let mut results = Vec::new();
+        self.query_range_recursive(bounds, &mut results);
+        results
+    }
+
+    /// Find nearest neighbor to a point
+    fn nearest_neighbor(&self, _point: &Point3<Real>) -> Option<&Polygon<S>> {
+        // Placeholder implementation - will be implemented in operations.rs
+        if self.is_leaf && !self.polygons.is_empty() {
+            Some(&self.polygons[0])
+        } else if !self.children.is_empty() {
+            self.children[0].nearest_neighbor(_point)
+        } else {
+            None
+        }
+    }
+
+    /// Find all polygons intersecting a ray
+    fn ray_intersections(&self, _ray: &crate::spatial::traits::Ray) -> Vec<crate::spatial::traits::Intersection<S>> {
+        // Placeholder implementation - will be implemented in operations.rs
+        Vec::new()
+    }
+
+    /// Get all polygons in the tree
+    fn all_polygons(&self) -> Vec<Polygon<S>> {
+        if self.is_leaf {
+            self.polygons.clone()
+        } else {
+            self.children.iter()
+                .flat_map(|child| child.all_polygons())
+                .collect()
+        }
+    }
+
+    /// Get tree statistics
+    fn statistics(&self) -> SpatialStatistics {
+        SpatialStatistics {
+            node_count: self.node_count(),
+            polygon_count: self.polygon_count(),
+            max_depth: self.depth(),
+            memory_usage_bytes: self.memory_usage(),
+        }
+    }
+
+    /// Get bounding box of the entire tree
+    fn bounding_box(&self) -> Option<Aabb> {
+        self.bounding_box.clone()
+    }
+}
+
+impl<S: Clone> Node<S> {
+    /// Recursive helper for range queries
+    fn query_range_recursive<'a>(&'a self, bounds: &Aabb, results: &mut Vec<&'a Polygon<S>>) {
+        // Check if this node's bounding box intersects the query bounds
+        if let Some(ref node_bounds) = self.bounding_box {
+            if !node_bounds.intersects(bounds) {
+                return;
+            }
+        }
+
+        if self.is_leaf {
+            // Check each polygon in this leaf
+            for polygon in &self.polygons {
+                if crate::spatial::utils::polygon_intersects_bounds(polygon, bounds) {
+                    results.push(polygon);
+                }
+            }
+        } else {
+            // Recursively search children
+            for child in &self.children {
+                child.query_range_recursive(bounds, results);
+            }
+        }
     }
 }

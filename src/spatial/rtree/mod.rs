@@ -12,7 +12,7 @@
 //! ## Basic Usage
 //!
 //! ```rust
-//! use csgrs::spatial::rtree::Node;
+//! use csgrs::spatial::{rtree::Node, SpatialIndex};
 //! use csgrs::geometry::{Polygon, Vertex};
 //! use nalgebra::{Point3, Vector3};
 //!
@@ -48,14 +48,14 @@
 //! ];
 //! let polygon: Polygon<i32> = Polygon::new(vertices, None);
 //!
-//! rtree.insert(polygon);
+//! rtree.insert_rtree(polygon);
 //! assert_eq!(rtree.polygon_count(), 1);
 //! ```
 //!
 //! ## Range Queries
 //!
 //! ```rust
-//! use csgrs::spatial::{rtree::Node, traits::Aabb};
+//! use csgrs::spatial::{rtree::Node, traits::Aabb, SpatialIndex};
 //! use csgrs::geometry::{Polygon, Vertex};
 //! use nalgebra::{Point3, Vector3};
 //!

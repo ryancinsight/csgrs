@@ -286,6 +286,65 @@ impl ProgressiveMesh {
 }
 ```
 
+## Polymorphic Usage with SpatialIndex Trait
+
+Octrees implement the `SpatialIndex` trait, enabling polymorphic usage alongside BSP trees and KD-trees:
+
+```rust
+use csgrs::spatial::{SpatialIndex, SpatialStructureFactory, QueryType};
+
+// Create Octree as trait object
+let octree: Box<dyn SpatialIndex<i32>> = SpatialStructureFactory::create_octree(&polygons);
+
+// Use polymorphically with other structures
+fn analyze_structure<S: Clone + Send + Sync + std::fmt::Debug>(
+    structure: &dyn SpatialIndex<S>
+) -> usize {
+    structure.statistics().node_count
+}
+
+let node_count = analyze_structure(octree.as_ref());
+
+// Automatic optimal selection for volume queries
+let optimal_structure = SpatialStructureFactory::create_optimal(&polygons, QueryType::VolumeQuery);
+// Will likely choose Octree for volume-based operations
+```
+
+This enables writing generic spatial algorithms that work with any spatial structure type.
+
+### Configuration Examples
+
+```rust
+use csgrs::spatial::{SpatialConfig, SpatialStructureFactory};
+use csgrs::geometry::{Polygon, Vertex};
+use nalgebra::{Point3, Vector3};
+
+// Create test data
+let vertices = vec![
+    Vertex::new(Point3::new(0.0, 0.0, 0.0), Vector3::new(0.0, 0.0, 1.0)),
+    Vertex::new(Point3::new(1.0, 0.0, 0.0), Vector3::new(0.0, 0.0, 1.0)),
+    Vertex::new(Point3::new(0.5, 1.0, 0.0), Vector3::new(0.0, 0.0, 1.0)),
+];
+let polygon: Polygon<i32> = Polygon::new(vertices, None);
+let polygons = vec![polygon];
+
+// Use predefined configuration optimized for volume queries
+let volume_config = SpatialConfig::for_volume_queries();
+let octree = SpatialStructureFactory::create_octree_with_config(&polygons, &volume_config);
+
+// Customize configuration for adaptive refinement
+let mut adaptive_config = SpatialConfig::for_volume_queries();
+adaptive_config.max_depth = 6;
+adaptive_config.adaptive_refinement = true;
+adaptive_config.min_subdivision_volume = 0.01;
+
+let adaptive_octree = SpatialStructureFactory::create_octree_with_config(&polygons, &adaptive_config);
+
+// Both trees work with the same interface
+assert_eq!(octree.all_polygons().len(), 1);
+assert_eq!(adaptive_octree.all_polygons().len(), 1);
+```
+
 ## Best Practices
 
 ### When to Use Octrees

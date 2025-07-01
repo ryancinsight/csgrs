@@ -13,6 +13,7 @@ pub mod parallel;
 
 // Re-export the main types for public API
 pub use core::Node;
+pub use operations::BspConfig;
 
 use std::fmt::Debug;
 

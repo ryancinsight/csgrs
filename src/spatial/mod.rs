@@ -10,6 +10,9 @@
 //! # Modules
 //!
 //! - [`bsp`]: Binary Space Partitioning tree implementation for spatial subdivision
+//! - [`kdtree`]: K-Dimensional tree implementation for point queries and nearest neighbor searches
+//! - [`octree`]: Octree implementation for hierarchical 3D space subdivision and level-of-detail operations
+//! - [`traits`]: Common interfaces and utilities for all spatial data structures
 //!
 //! # Design Philosophy
 //!
@@ -23,6 +26,21 @@
 //! - **Extensibility**: Easy addition of new spatial data structures (kdtree, octree, etc.)
 
 pub mod bsp;
+pub mod bvh;
+pub mod kdtree;
+pub mod octree;
+pub mod rtree;
+pub mod traits;
+pub mod utils;
 
-// Re-export the main BSP types for convenience
+// Re-export the main types for convenience
 pub use bsp::Node as BspNode;
+pub use kdtree::Node as KdTreeNode;
+pub use octree::Node as OctreeNode;
+
+// Re-export common traits and utilities
+pub use traits::{
+    SpatialIndex, Aabb, Ray, Intersection, SpatialStructureSelector, QueryType,
+    SpatialStructureType, PerformanceMatrix, SpatialBenchmark, BenchmarkResults,
+    SpatialStructureFactory, SpatialConfig, SpatialError, SpatialResult
+};

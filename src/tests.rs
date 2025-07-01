@@ -1,6 +1,6 @@
 use crate::core::float_types::{EPSILON, FRAC_PI_2, Real};
 use crate::csg::CSG;
-use crate::csg::bsp::Node;
+use crate::spatial::bsp::Node;
 use crate::geometry::Plane;
 use crate::geometry::Polygon;
 use crate::geometry::Vertex;

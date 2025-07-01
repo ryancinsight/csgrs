@@ -196,6 +196,65 @@ let (section_polygons, intersection_edges) = bsp.slice(&section_plane);
 let section_2d = convert_to_2d(&section_polygons, &intersection_edges);
 ```
 
+## Polymorphic Usage with SpatialIndex Trait
+
+BSP trees implement the `SpatialIndex` trait, enabling polymorphic usage alongside KD-trees and Octrees:
+
+```rust
+use csgrs::spatial::{SpatialIndex, SpatialStructureFactory, QueryType};
+
+// Create BSP tree as trait object
+let bsp: Box<dyn SpatialIndex<i32>> = SpatialStructureFactory::create_bsp(&polygons);
+
+// Use polymorphically with other structures
+fn analyze_structure<S: Clone + Send + Sync + std::fmt::Debug>(
+    structure: &dyn SpatialIndex<S>
+) -> usize {
+    structure.statistics().node_count
+}
+
+let node_count = analyze_structure(bsp.as_ref());
+
+// Automatic optimal selection for Boolean operations
+let optimal_structure = SpatialStructureFactory::create_optimal(&polygons, QueryType::BooleanOperations);
+// Will choose BSP tree for Boolean operations
+```
+
+**Note**: Some SpatialIndex methods like `nearest_neighbor` and `ray_intersections` are not efficiently implemented for BSP trees, as they are optimized for Boolean operations rather than point queries.
+
+### Configuration Examples
+
+```rust
+use csgrs::spatial::{SpatialConfig, SpatialStructureFactory};
+use csgrs::geometry::{Polygon, Vertex};
+use nalgebra::{Point3, Vector3};
+
+// Create test data
+let vertices = vec![
+    Vertex::new(Point3::new(0.0, 0.0, 0.0), Vector3::new(0.0, 0.0, 1.0)),
+    Vertex::new(Point3::new(1.0, 0.0, 0.0), Vector3::new(0.0, 0.0, 1.0)),
+    Vertex::new(Point3::new(0.5, 1.0, 0.0), Vector3::new(0.0, 0.0, 1.0)),
+];
+let polygon: Polygon<i32> = Polygon::new(vertices, None);
+let polygons = vec![polygon];
+
+// Use predefined configuration optimized for Boolean operations
+let boolean_config = SpatialConfig::for_boolean_operations();
+let bsp = SpatialStructureFactory::create_bsp_with_config(&polygons, &boolean_config);
+
+// Customize configuration for precision-critical applications
+let mut precision_config = SpatialConfig::for_boolean_operations();
+precision_config.max_depth = 30;
+precision_config.balance_factor = 0.8;    // Favor balanced splits
+precision_config.spanning_factor = 0.2;   // Minimize spanning polygons
+
+let precision_bsp = SpatialStructureFactory::create_bsp_with_config(&polygons, &precision_config);
+
+// Both trees work with the same interface
+assert_eq!(bsp.all_polygons().len(), 1);
+assert_eq!(precision_bsp.all_polygons().len(), 1);
+```
+
 ## Best Practices
 
 ### Plane Selection

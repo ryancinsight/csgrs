@@ -1,6 +1,8 @@
 use super::CSG;
 use crate::core::float_types::parry3d::bounding_volume::{Aabb, BoundingVolume};
-use crate::csg::bsp::Node;
+use crate::spatial::bsp::Node;
+// TODO: Re-enable when spatial integration is complete
+// use crate::spatial::{SpatialStructureFactory, QueryType, SpatialIndex};
 use crate::geometry::Polygon;
 use geo::{BooleanOps, Geometry, GeometryCollection, Orient, orient::Direction};
 use std::fmt::Debug;
@@ -16,6 +18,19 @@ impl<S: Clone + Debug + Send + Sync> CSG<S> {
             .iter()
             .cloned()
             .partition(|p| p.bounding_box().intersects(other_bb))
+    }
+
+    /// Future enhancement: Create optimal spatial structure for CSG operations
+    /// This will provide transparent spatial acceleration while maintaining API compatibility
+    /// For now, this is a placeholder that returns the original polygons
+    fn _prepare_polygons_for_optimization(polygons: &[Polygon<S>]) -> Vec<Polygon<S>> {
+        // TODO: Integrate SpatialStructureFactory::create_optimal() when lifetime constraints are resolved
+        // This will enable automatic selection of optimal spatial structures:
+        // - BSP trees for boolean operations
+        // - BVH for ray tracing
+        // - KD-trees for point location
+        // - R-trees for range queries
+        polygons.to_vec()
     }
 
     /// Return a new CSG representing union of the two CSG's.
@@ -44,6 +59,10 @@ impl<S: Clone + Debug + Send + Sync> CSG<S> {
             Self::partition_polys(&self.polygons, &other.bounding_box());
         let (b_clip, b_passthru) =
             Self::partition_polys(&other.polygons, &self.bounding_box());
+
+        // TODO: Future enhancement - use intelligent spatial structure selection
+        // let optimized_a = Self::_prepare_polygons_for_optimization(&a_clip);
+        // let optimized_b = Self::_prepare_polygons_for_optimization(&b_clip);
 
         let mut a = Node::from_polygons(&a_clip);
         let mut b = Node::from_polygons(&b_clip);
@@ -126,6 +145,10 @@ impl<S: Clone + Debug + Send + Sync> CSG<S> {
         let (b_clip, _b_passthru) =
             Self::partition_polys(&other.polygons, &self.bounding_box());
 
+        // TODO: Future enhancement - use intelligent spatial structure selection
+        // let optimized_a = Self::_prepare_polygons_for_optimization(&a_clip);
+        // let optimized_b = Self::_prepare_polygons_for_optimization(&b_clip);
+
         let mut a = Node::from_polygons(&a_clip);
         let mut b = Node::from_polygons(&b_clip);
 
@@ -196,6 +219,10 @@ impl<S: Clone + Debug + Send + Sync> CSG<S> {
             Self::partition_polys(&self.polygons, &other.bounding_box());
         let (b_clip, _b_passthru) =
             Self::partition_polys(&other.polygons, &self.bounding_box());
+
+        // TODO: Future enhancement - use intelligent spatial structure selection
+        // let optimized_a = Self::_prepare_polygons_for_optimization(&a_clip);
+        // let optimized_b = Self::_prepare_polygons_for_optimization(&b_clip);
 
         let mut a = Node::from_polygons(&a_clip);
         let mut b = Node::from_polygons(&b_clip);

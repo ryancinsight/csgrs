@@ -6,11 +6,10 @@
 //! - Advanced search operations
 
 use super::core::Node;
-use super::config::{RTreeConfig, SplitAlgorithm};
+use super::config::SplitAlgorithm;
 use crate::geometry::Polygon;
 use crate::spatial::traits::Aabb;
 use crate::core::float_types::Real;
-use std::fmt::Debug;
 
 impl<S: Clone> Node<S> {
     /// Insert a polygon into the R-tree using proper R-tree insertion algorithm
@@ -51,7 +50,7 @@ impl<S: Clone> Node<S> {
         let leaf_path = self.choose_leaf(&polygon_bounds);
         
         // Insert into the chosen leaf
-        if let Some(leaf) = leaf_path.last() {
+        if let Some(_leaf) = leaf_path.last() {
             // For now, simple insertion - will be enhanced with proper path tracking
             self.insert_into_leaf(polygon, polygon_bounds);
         } else {
@@ -252,7 +251,7 @@ impl<S: Clone> Node<S> {
         self.linear_split();
     }
     
-    /// Remove a polygon from the R-tree
+    /// Remove a polygon from the R-tree by metadata
     ///
     /// # Examples
     ///
@@ -268,22 +267,22 @@ impl<S: Clone> Node<S> {
     ///     Vertex::new(Point3::new(1.0, 0.0, 0.0), Vector3::new(0.0, 0.0, 1.0)),
     ///     Vertex::new(Point3::new(0.5, 1.0, 0.0), Vector3::new(0.0, 0.0, 1.0)),
     /// ];
-    /// let polygon: Polygon<i32> = Polygon::new(vertices, None);
+    /// let polygon: Polygon<i32> = Polygon::new(vertices, Some(42));
     ///
     /// rtree.insert_rtree(polygon.clone());
     /// assert_eq!(rtree.polygon_count(), 1);
     ///
-    /// let removed = rtree.remove_rtree(&polygon);
+    /// let removed = rtree.remove_by_metadata(&Some(42));
     /// assert!(removed);
     /// assert_eq!(rtree.polygon_count(), 0);
     /// ```
-    pub fn remove_rtree(&mut self, polygon: &Polygon<S>) -> bool
+    pub fn remove_by_metadata(&mut self, metadata: &Option<S>) -> bool
     where
         S: PartialEq,
     {
         if self.is_leaf {
-            // Try to find and remove the polygon
-            if let Some(pos) = self.polygons.iter().position(|p| p == polygon) {
+            // Try to find and remove the polygon by metadata
+            if let Some(pos) = self.polygons.iter().position(|p| &p.metadata == metadata) {
                 self.polygons.remove(pos);
                 self.update_bounding_box();
                 return true;
@@ -292,7 +291,7 @@ impl<S: Clone> Node<S> {
         } else {
             // Search children
             for child in &mut self.children {
-                if child.remove_rtree(polygon) {
+                if child.remove_by_metadata(metadata) {
                     self.update_bounding_box();
                     return true;
                 }

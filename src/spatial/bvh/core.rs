@@ -318,13 +318,9 @@ impl<S: Clone> Node<S> {
         2.0 * (size.x * size.y + size.y * size.z + size.z * size.x)
     }
     
-    /// Placeholder for BVH construction - implemented in construction.rs
-    fn build_bvh(polygons: &[Polygon<S>], config: &BVHConfig) -> Self {
-        // For now, create a simple leaf node
-        let mut node = Self::with_config(config.clone());
-        node.polygons = polygons.to_vec();
-        node.update_bounding_volume();
-        node
+    /// Build BVH using construction algorithms from construction.rs
+    pub fn build_bvh(polygons: &[Polygon<S>], config: &BVHConfig) -> Self {
+        Self::build_bvh_with_algorithm(polygons, config)
     }
     
     /// Insert an object into the BVH (dynamic operation)
@@ -359,5 +355,158 @@ impl<S: Clone> Node<S> {
             self.children = None;
             self.update_bounding_volume();
         }
+    }
+}
+
+impl<S: Clone + Send + Sync + Debug> SpatialIndex<S> for Node<S> {
+    /// Build BVH from polygons
+    fn build(polygons: &[Polygon<S>]) -> Self where Self: Sized {
+        Self::from_polygons(polygons)
+    }
+
+    /// Create empty BVH
+    fn new() -> Self where Self: Sized {
+        Self::new()
+    }
+
+    /// Query polygons within a bounding box
+    fn query_range(&self, bounds: &Aabb) -> Vec<&Polygon<S>> {
+        let mut results = Vec::new();
+        self.query_range_recursive(bounds, &mut results);
+        results
+    }
+
+    /// Find nearest neighbor to a point
+    fn nearest_neighbor(&self, point: &Point3<Real>) -> Option<&Polygon<S>> {
+        // Placeholder implementation - will be enhanced in operations.rs
+        if self.is_leaf && !self.polygons.is_empty() {
+            Some(&self.polygons[0])
+        } else if let Some((ref left, ref right)) = self.children {
+            // Choose closer child first
+            let left_dist = if let Some(ref bounds) = left.bounding_volume {
+                self.point_to_aabb_distance(point, bounds)
+            } else {
+                Real::INFINITY
+            };
+            let right_dist = if let Some(ref bounds) = right.bounding_volume {
+                self.point_to_aabb_distance(point, bounds)
+            } else {
+                Real::INFINITY
+            };
+
+            if left_dist <= right_dist {
+                left.nearest_neighbor(point).or_else(|| right.nearest_neighbor(point))
+            } else {
+                right.nearest_neighbor(point).or_else(|| left.nearest_neighbor(point))
+            }
+        } else {
+            None
+        }
+    }
+
+    /// Find all polygons intersecting a ray (optimized for ray tracing)
+    fn ray_intersections(&self, ray: &Ray) -> Vec<Intersection<S>> {
+        let mut intersections = Vec::new();
+        self.ray_intersections_recursive(ray, &mut intersections);
+        intersections
+    }
+
+    /// Get all polygons in the BVH
+    fn all_polygons(&self) -> Vec<Polygon<S>> {
+        if self.is_leaf {
+            self.polygons.clone()
+        } else if let Some((ref left, ref right)) = self.children {
+            let mut all = left.all_polygons();
+            all.extend(right.all_polygons());
+            all
+        } else {
+            Vec::new()
+        }
+    }
+
+    /// Get BVH statistics
+    fn statistics(&self) -> SpatialStatistics {
+        SpatialStatistics {
+            node_count: self.node_count(),
+            polygon_count: self.polygon_count(),
+            max_depth: self.depth(),
+            memory_usage_bytes: self.memory_usage(),
+        }
+    }
+
+    /// Get bounding volume of the entire BVH
+    fn bounding_box(&self) -> Option<Aabb> {
+        self.bounding_volume.clone()
+    }
+
+    /// Check if a point is contained within the BVH's bounding volume
+    fn contains_point(&self, point: &Point3<Real>) -> bool {
+        if let Some(ref bounds) = self.bounding_volume {
+            crate::spatial::utils::bounds_contains_point(bounds, point)
+        } else {
+            false
+        }
+    }
+}
+
+impl<S: Clone> Node<S> {
+    /// Recursive helper for range queries
+    fn query_range_recursive<'a>(&'a self, bounds: &Aabb, results: &mut Vec<&'a Polygon<S>>) {
+        // Check if this node's bounding volume intersects the query bounds
+        if let Some(ref node_bounds) = self.bounding_volume {
+            if !node_bounds.intersects(bounds) {
+                return;
+            }
+        }
+
+        if self.is_leaf {
+            // Check each polygon in this leaf
+            for polygon in &self.polygons {
+                if crate::spatial::utils::polygon_intersects_bounds(polygon, bounds) {
+                    results.push(polygon);
+                }
+            }
+        } else if let Some((ref left, ref right)) = self.children {
+            // Recursively search children
+            left.query_range_recursive(bounds, results);
+            right.query_range_recursive(bounds, results);
+        }
+    }
+
+    /// Recursive helper for ray intersections (optimized for ray tracing)
+    fn ray_intersections_recursive(&self, ray: &Ray, intersections: &mut Vec<Intersection<S>>) {
+        // Check if ray intersects this node's bounding volume
+        if let Some(ref bounds) = self.bounding_volume {
+            if !crate::spatial::utils::ray_intersects_aabb(ray, bounds) {
+                return;
+            }
+        }
+
+        if self.is_leaf {
+            // Test ray against each polygon in this leaf
+            for polygon in &self.polygons {
+                // Placeholder: create intersection record
+                // In a full implementation, this would perform ray-triangle intersection
+                let intersection = Intersection {
+                    polygon: polygon.clone(),
+                    distance: 1.0, // Placeholder distance
+                    point: ray.origin + ray.direction, // Placeholder intersection point
+                    normal: nalgebra::Vector3::new(0.0, 0.0, 1.0), // Placeholder normal
+                };
+                intersections.push(intersection);
+            }
+        } else if let Some((ref left, ref right)) = self.children {
+            // Recursively test children
+            left.ray_intersections_recursive(ray, intersections);
+            right.ray_intersections_recursive(ray, intersections);
+        }
+    }
+
+    /// Calculate distance from point to AABB
+    fn point_to_aabb_distance(&self, point: &Point3<Real>, aabb: &Aabb) -> Real {
+        let dx = (point.x - aabb.max.x).max(0.0).max(aabb.min.x - point.x);
+        let dy = (point.y - aabb.max.y).max(0.0).max(aabb.min.y - point.y);
+        let dz = (point.z - aabb.max.z).max(0.0).max(aabb.min.z - point.z);
+        (dx * dx + dy * dy + dz * dz).sqrt()
     }
 }

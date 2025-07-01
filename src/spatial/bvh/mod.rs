@@ -13,7 +13,7 @@
 //! ## Basic Usage
 //!
 //! ```rust
-//! use csgrs::spatial::bvh::Node;
+//! use csgrs::spatial::{bvh::Node, SpatialIndex};
 //! use csgrs::geometry::{Polygon, Vertex};
 //! use nalgebra::{Point3, Vector3};
 //!
@@ -81,7 +81,7 @@
 //! ## SAH Construction
 //!
 //! ```rust
-//! use csgrs::spatial::bvh::{Node, BVHConfig, ConstructionAlgorithm};
+//! use csgrs::spatial::{bvh::{Node, BVHConfig, ConstructionAlgorithm}, SpatialIndex};
 //! use csgrs::geometry::{Polygon, Vertex};
 //! use nalgebra::{Point3, Vector3};
 //!

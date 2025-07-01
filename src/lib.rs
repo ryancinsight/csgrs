@@ -1,5 +1,5 @@
 //! A fast, optionally multithreaded **Constructive Solid Geometry (CSG)** library,
-//! built around Boolean operations (*union*, *difference*, *intersection*, *xor*) on sets of polygons stored in [BSP](csg::bsp) trees.
+//! built around Boolean operations (*union*, *difference*, *intersection*, *xor*) on sets of polygons stored in [BSP](spatial::bsp) trees.
 //!
 //! ![Example CSG output][Example CSG output]
 #![cfg_attr(doc, doc = doc_image_embed::embed_image!("Example CSG output", "docs/csg.png"))]
@@ -36,6 +36,7 @@ pub mod geometry;
 pub mod io;
 pub mod math;
 pub mod primitives;
+pub mod spatial;
 pub mod text;
 pub mod utils;
 
@@ -54,6 +55,9 @@ compile_error!("Either 'f64' or 'f32' feature must be specified, but not both");
 pub use core::{EPSILON, FRAC_PI_2, PI, Real, TAU, ValidationError};
 pub use csg::CSG;
 pub use geometry::Vertex;
+pub use spatial::bsp::Node as BspNode;
+pub use spatial::kdtree::Node as KdTreeNode;
+pub use spatial::octree::Node as OctreeNode;
 
 #[cfg(test)]
 mod tests;

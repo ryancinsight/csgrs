@@ -4,11 +4,10 @@
 //! object management, optimized for performance and cache efficiency.
 
 use super::core::Node;
-use super::config::BVHConfig;
 use crate::geometry::Polygon;
 use crate::spatial::traits::{Aabb, Ray, Intersection};
 use crate::core::float_types::Real;
-use nalgebra::{Point3, Vector3};
+use nalgebra::Vector3;
 
 impl<S: Clone> Node<S> {
     /// Optimized ray traversal using stack-based iteration
@@ -279,7 +278,7 @@ impl<S: Clone> Node<S> {
     /// Determine optimal child traversal order for ray direction
     fn should_traverse_left_first(&self, ray: &Ray, left: &Node<S>, right: &Node<S>) -> bool {
         // Simple heuristic: traverse child closer to ray origin first
-        if let (Some(ref left_bounds), Some(ref right_bounds)) = 
+        if let (Some(left_bounds), Some(right_bounds)) =
             (&left.bounding_volume, &right.bounding_volume) {
             let left_dist = self.ray_aabb_entry_distance(ray, left_bounds);
             let right_dist = self.ray_aabb_entry_distance(ray, right_bounds);

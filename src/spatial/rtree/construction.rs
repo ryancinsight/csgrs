@@ -9,9 +9,8 @@ use super::config::RTreeConfig;
 use crate::geometry::Polygon;
 use crate::spatial::traits::Aabb;
 use crate::core::float_types::Real;
-use std::fmt::Debug;
 
-impl<S: Clone> Node<S> {
+impl<S: Clone + Send + Sync> Node<S> {
     /// Bulk load R-tree using STR (Sort-Tile-Recursive) algorithm
     ///
     /// This algorithm provides better tree quality than incremental insertion
@@ -206,6 +205,7 @@ impl<S: Clone> Node<S> {
     ///
     /// This is a helper function for bulk loading algorithms that
     /// creates leaf nodes with near-optimal fill factors.
+    #[allow(dead_code)]
     fn pack_leaves(polygons: &[Polygon<S>], config: &RTreeConfig) -> Vec<Node<S>> {
         let mut leaves = Vec::new();
         let mut current_leaf = Self::with_config(config.clone());
@@ -236,6 +236,7 @@ impl<S: Clone> Node<S> {
     ///
     /// This is used for Hilbert curve bulk loading to order polygons
     /// along a space-filling curve for better spatial locality.
+    #[allow(dead_code)]
     fn hilbert_value(x: Real, y: Real, order: u32) -> u64 {
         // Simplified Hilbert curve calculation
         // In a full implementation, this would be more sophisticated
@@ -272,7 +273,8 @@ impl<S: Clone> Node<S> {
                 // Verify all polygons are contained in bounding box
                 for polygon in &self.polygons {
                     if let Some(poly_bounds) = crate::spatial::utils::polygon_bounds(polygon) {
-                        if !bounds.contains(&poly_bounds.min) || !bounds.contains(&poly_bounds.max) {
+                        if !crate::spatial::utils::bounds_contains_point(bounds, &poly_bounds.min) ||
+                           !crate::spatial::utils::bounds_contains_point(bounds, &poly_bounds.max) {
                             return Err("Polygon not contained in node bounding box".to_string());
                         }
                     }
@@ -281,7 +283,8 @@ impl<S: Clone> Node<S> {
                 // Verify all children are contained in bounding box
                 for child in &self.children {
                     if let Some(ref child_bounds) = child.bounding_box {
-                        if !bounds.contains(&child_bounds.min) || !bounds.contains(&child_bounds.max) {
+                        if !crate::spatial::utils::bounds_contains_point(bounds, &child_bounds.min) ||
+                           !crate::spatial::utils::bounds_contains_point(bounds, &child_bounds.max) {
                             return Err("Child not contained in parent bounding box".to_string());
                         }
                     }

@@ -3,8 +3,6 @@
 use super::core::{Axis, Node};
 use crate::geometry::Polygon;
 use crate::core::float_types::Real;
-use crate::spatial::traits::Aabb;
-use nalgebra::Point3;
 use std::fmt::Debug;
 
 #[cfg(feature = "parallel")]

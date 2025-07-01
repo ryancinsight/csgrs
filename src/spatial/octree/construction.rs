@@ -86,7 +86,7 @@ impl<S: Clone + Send + Sync + Debug> Node<S> {
         depth: usize,
         config: &OctreeConfig,
     ) -> Self {
-        let mut node = Self::new_with_bounds(bounds);
+        let mut node = Self::new_with_bounds(bounds.clone());
         node.level = depth;
 
         // Base cases for recursion termination
@@ -94,7 +94,7 @@ impl<S: Clone + Send + Sync + Debug> Node<S> {
             return node;
         }
 
-        if depth >= config.max_depth 
+        if depth >= config.max_depth
             || polygons.len() <= config.max_polygons_per_leaf
             || bounds.volume() < config.min_subdivision_volume {
             // Create leaf node
@@ -151,7 +151,7 @@ impl<S: Clone + Send + Sync + Debug> Node<S> {
         depth: usize,
         config: &OctreeConfig,
     ) -> Self {
-        let mut node = Self::new_with_bounds(bounds);
+        let mut node = Self::new_with_bounds(bounds.clone());
         node.level = depth;
 
         // Base cases for recursion termination
@@ -159,7 +159,7 @@ impl<S: Clone + Send + Sync + Debug> Node<S> {
             return node;
         }
 
-        if depth >= config.max_depth 
+        if depth >= config.max_depth
             || polygons.len() <= config.max_polygons_per_leaf
             || bounds.volume() < config.min_subdivision_volume {
             // Create leaf node
@@ -235,7 +235,7 @@ impl<S: Clone + Send + Sync + Debug> Node<S> {
                 } else {
                     let (octant, polys, bounds) = &chunk[0];
                     if !polys.is_empty() {
-                        let child = Self::build_recursive_parallel(polys, bounds, depth + 1, config);
+                        let child = Self::build_recursive_parallel(polys, bounds.clone(), depth + 1, config);
                         child_results.push((*octant, child));
                     }
                 }
@@ -286,7 +286,7 @@ impl<S: Clone + Send + Sync + Debug> Node<S> {
 
         // Recursively refine children
         for child in &mut self.children {
-            if let Some(ref mut child_node) = child {
+            if let Some(child_node) = child {
                 child_node.adaptive_refine(config);
             }
         }
@@ -301,7 +301,7 @@ impl<S: Clone + Send + Sync + Debug> Node<S> {
 
         // For now, just recursively optimize children
         for child in &mut self.children {
-            if let Some(ref mut child_node) = child {
+            if let Some(child_node) = child {
                 child_node.optimize();
             }
         }
@@ -311,7 +311,7 @@ impl<S: Clone + Send + Sync + Debug> Node<S> {
     pub fn validate(&self) -> Result<(), String> {
         // Check that all polygons in children are within the parent bounds
         for (i, child) in self.children.iter().enumerate() {
-            if let Some(ref child_node) = child {
+            if let Some(child_node) = child {
                 let octant = match i {
                     0 => Octant::BottomFrontLeft,
                     1 => Octant::BottomFrontRight,
@@ -361,7 +361,7 @@ impl<S: Clone + Send + Sync + Debug> Node<S> {
         }
 
         for child in &self.children {
-            if let Some(ref child_node) = child {
+            if let Some(child_node) = child {
                 child_node.collect_subdivision_stats(stats);
             }
         }

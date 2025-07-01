@@ -6,8 +6,7 @@ use crate::spatial::traits::{Aabb, SpatialIndex, SpatialStatistics};
 use nalgebra::Point3;
 use std::fmt::Debug;
 
-#[cfg(feature = "parallel")]
-use rayon::join;
+
 
 /// Splitting axis for KD-tree nodes
 #[derive(Debug, Clone, Copy, PartialEq)]
@@ -157,18 +156,7 @@ impl<S: Clone + Send + Sync + Debug> Node<S> {
 
     /// Merge two bounding boxes
     fn merge_bounds(&self, a: &Aabb, b: &Aabb) -> Aabb {
-        Aabb::new(
-            Point3::new(
-                a.min.x.min(b.min.x),
-                a.min.y.min(b.min.y),
-                a.min.z.min(b.min.z),
-            ),
-            Point3::new(
-                a.max.x.max(b.max.x),
-                a.max.y.max(b.max.y),
-                a.max.z.max(b.max.z),
-            ),
-        )
+        crate::spatial::utils::merge_bounds(a, b)
     }
 
     /// Get the center point of a polygon (centroid of vertices)

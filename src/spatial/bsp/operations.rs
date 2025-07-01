@@ -5,6 +5,33 @@ use crate::core::float_types::{EPSILON, Real};
 use crate::geometry::{BACK, COPLANAR, FRONT, Plane, Polygon, SPANNING, Vertex};
 use std::fmt::Debug;
 
+/// Configuration for BSP tree construction
+#[derive(Debug, Clone)]
+pub struct BspConfig {
+    /// Maximum depth of the tree
+    pub max_depth: usize,
+    /// Minimum number of polygons per leaf node
+    pub min_polygons_per_leaf: usize,
+    /// Maximum number of polygons per leaf node before splitting
+    pub max_polygons_per_leaf: usize,
+    /// Balance factor for plane selection (0.0 to 1.0)
+    pub balance_factor: Real,
+    /// Spanning factor for plane selection (0.0 to 1.0)
+    pub spanning_factor: Real,
+}
+
+impl Default for BspConfig {
+    fn default() -> Self {
+        Self {
+            max_depth: 25,
+            min_polygons_per_leaf: 1,
+            max_polygons_per_leaf: 8,
+            balance_factor: 0.5,
+            spanning_factor: 0.5,
+        }
+    }
+}
+
 impl<S: Clone + Send + Sync + Debug> Node<S> {
     pub(super) fn pick_best_splitting_plane(&self, polygons: &[Polygon<S>]) -> Plane {
         const K_SPANS: Real = 8.0; // Weight for spanning polygons
@@ -290,5 +317,101 @@ impl<S: Clone + Send + Sync + Debug> Node<S> {
         if let Some(back) = &self.back {
             back.slice_recursive(slicing_plane, coplanar_polygons, intersection_edges);
         }
+    }
+
+    /// Build BSP tree from polygons using custom configuration
+    pub fn from_polygons_with_config(polygons: &[Polygon<S>], config: &BspConfig) -> Self {
+        let mut node = Self::new();
+        node.build_with_config(polygons, config);
+        node
+    }
+
+    /// Build BSP tree using custom configuration
+    pub fn build_with_config(&mut self, polygons: &[Polygon<S>], config: &BspConfig) {
+        self.build_recursive_with_config(polygons, 0, config);
+    }
+
+    /// Recursive build with configuration
+    fn build_recursive_with_config(&mut self, polygons: &[Polygon<S>], depth: usize, config: &BspConfig) {
+        if polygons.is_empty() {
+            return;
+        }
+
+        // Check termination conditions
+        if depth >= config.max_depth || polygons.len() <= config.max_polygons_per_leaf {
+            self.polygons = polygons.to_vec();
+            return;
+        }
+
+        // Pick splitting plane using configuration factors
+        self.plane = Some(self.pick_best_splitting_plane_with_config(polygons, config));
+
+        let mut front_polys = Vec::new();
+        let mut back_polys = Vec::new();
+
+        for polygon in polygons {
+            match self.plane.as_ref().unwrap().classify_polygon(polygon) {
+                COPLANAR => self.polygons.push(polygon.clone()),
+                FRONT => front_polys.push(polygon.clone()),
+                BACK => back_polys.push(polygon.clone()),
+                SPANNING => {
+                    let (mut coplanar_front, mut coplanar_back, mut front_parts, mut back_parts) =
+                        self.plane.as_ref().unwrap().split_polygon(polygon);
+                    self.polygons.append(&mut coplanar_front);
+                    self.polygons.append(&mut coplanar_back);
+                    front_polys.append(&mut front_parts);
+                    back_polys.append(&mut back_parts);
+                },
+                _ => {} // Handle any other values
+            }
+        }
+
+        // Recursively build children
+        if !front_polys.is_empty() {
+            let mut front_node = Node::new();
+            front_node.build_recursive_with_config(&front_polys, depth + 1, config);
+            self.front = Some(Box::new(front_node));
+        }
+
+        if !back_polys.is_empty() {
+            let mut back_node = Node::new();
+            back_node.build_recursive_with_config(&back_polys, depth + 1, config);
+            self.back = Some(Box::new(back_node));
+        }
+    }
+
+    /// Pick best splitting plane using configuration factors
+    fn pick_best_splitting_plane_with_config(&self, polygons: &[Polygon<S>], config: &BspConfig) -> Plane {
+        let mut best_plane = polygons[0].plane.clone();
+        let mut best_score = Real::INFINITY;
+
+        for polygon in polygons {
+            let plane = &polygon.plane;
+            let mut front_count = 0;
+            let mut back_count = 0;
+            let mut spanning_count = 0;
+
+            for test_polygon in polygons {
+                match plane.classify_polygon(test_polygon) {
+                    FRONT => front_count += 1,
+                    BACK => back_count += 1,
+                    SPANNING => spanning_count += 1,
+                    COPLANAR => {},
+                    _ => {} // Handle any other values
+                }
+            }
+
+            // Calculate score using configuration factors
+            let balance = (front_count as Real - back_count as Real).abs();
+            let spanning = spanning_count as Real;
+            let score = config.balance_factor * balance + config.spanning_factor * spanning;
+
+            if score < best_score {
+                best_score = score;
+                best_plane = plane.clone();
+            }
+        }
+
+        best_plane
     }
 }

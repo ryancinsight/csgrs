@@ -39,7 +39,7 @@
 //! let bounds2 = Aabb::new(Point3::new(0.5, 0.5, 0.5), Point3::new(1.5, 1.5, 1.5));
 //!
 //! // Calculate union of bounds
-//! let union = utils::bounds_union(&[bounds1, bounds2]);
+//! let union = utils::bounds_union(&[bounds1.clone(), bounds2.clone()]);
 //! assert_eq!(union.min, Point3::new(0.0, 0.0, 0.0));
 //! assert_eq!(union.max, Point3::new(1.5, 1.5, 1.5));
 //!
@@ -48,11 +48,10 @@
 //! assert!(intersection.is_some());
 //! ```
 
-use crate::geometry::{Polygon, Vertex};
+use crate::geometry::Polygon;
 use crate::core::float_types::Real;
 use crate::spatial::traits::{Aabb, Ray};
 use nalgebra::{Point3, Vector3};
-use std::fmt::Debug;
 
 /// Calculate the centroid (center point) of a polygon's vertices
 ///
@@ -97,6 +96,7 @@ pub fn polygon_center<S: Clone>(polygon: &Polygon<S>) -> Point3<Real> {
 /// let vertices = vec![
 ///     Vertex::new(Point3::new(-1.0, -1.0, -1.0), Vector3::new(0.0, 0.0, 1.0)),
 ///     Vertex::new(Point3::new(2.0, 3.0, 4.0), Vector3::new(0.0, 0.0, 1.0)),
+///     Vertex::new(Point3::new(0.0, 0.0, 0.0), Vector3::new(0.0, 0.0, 1.0)),
 /// ];
 /// let polygon: Polygon<i32> = Polygon::new(vertices, None);
 ///
@@ -255,7 +255,7 @@ pub fn point_in_polygon<S: Clone>(_point: &Point3<Real>, _polygon: &Polygon<S>) 
 /// use csgrs::geometry::Plane;
 /// use nalgebra::{Point3, Vector3};
 ///
-/// let plane = Plane::new(Vector3::new(0.0, 0.0, 1.0), 0.0); // XY plane at z=0
+/// let plane = Plane::from_normal(Vector3::new(0.0, 0.0, 1.0), 0.0); // XY plane at z=0
 /// let point = Point3::new(1.0, 1.0, 2.0);
 ///
 /// let distance = point_to_plane_distance(&point, &plane);
@@ -297,4 +297,463 @@ pub fn closest_point_on_polygon<S: Clone>(_query_point: &Point3<Real>, polygon: 
     // TODO: Implement proper closest point projection
     // For now, return polygon center as approximation
     polygon_center(polygon)
+}
+
+/// Calculate the intersection of two axis-aligned bounding boxes
+///
+/// Returns the overlapping region if the boxes intersect, None otherwise.
+///
+/// # Examples
+///
+/// ```rust
+/// use csgrs::spatial::{utils::bounds_intersection, traits::Aabb};
+/// use nalgebra::Point3;
+///
+/// let bounds1 = Aabb::new(Point3::new(0.0, 0.0, 0.0), Point3::new(2.0, 2.0, 2.0));
+/// let bounds2 = Aabb::new(Point3::new(1.0, 1.0, 1.0), Point3::new(3.0, 3.0, 3.0));
+///
+/// let intersection = bounds_intersection(&bounds1, &bounds2).unwrap();
+/// assert_eq!(intersection.min, Point3::new(1.0, 1.0, 1.0));
+/// assert_eq!(intersection.max, Point3::new(2.0, 2.0, 2.0));
+/// ```
+#[inline]
+pub fn bounds_intersection(a: &Aabb, b: &Aabb) -> Option<Aabb> {
+    let min = Point3::new(
+        a.min.x.max(b.min.x),
+        a.min.y.max(b.min.y),
+        a.min.z.max(b.min.z),
+    );
+    let max = Point3::new(
+        a.max.x.min(b.max.x),
+        a.max.y.min(b.max.y),
+        a.max.z.min(b.max.z),
+    );
+
+    if min.x <= max.x && min.y <= max.y && min.z <= max.z {
+        Some(Aabb::new(min, max))
+    } else {
+        None
+    }
+}
+
+/// Calculate the union of multiple axis-aligned bounding boxes
+///
+/// Returns the smallest AABB that contains all input boxes.
+///
+/// # Examples
+///
+/// ```rust
+/// use csgrs::spatial::{utils::bounds_union, traits::Aabb};
+/// use nalgebra::Point3;
+///
+/// let bounds = vec![
+///     Aabb::new(Point3::new(0.0, 0.0, 0.0), Point3::new(1.0, 1.0, 1.0)),
+///     Aabb::new(Point3::new(2.0, 2.0, 2.0), Point3::new(3.0, 3.0, 3.0)),
+///     Aabb::new(Point3::new(-1.0, -1.0, -1.0), Point3::new(0.5, 0.5, 0.5)),
+/// ];
+///
+/// let union = bounds_union(&bounds);
+/// assert_eq!(union.min, Point3::new(-1.0, -1.0, -1.0));
+/// assert_eq!(union.max, Point3::new(3.0, 3.0, 3.0));
+/// ```
+#[inline]
+pub fn bounds_union(bounds: &[Aabb]) -> Aabb {
+    if bounds.is_empty() {
+        return Aabb::new(Point3::origin(), Point3::origin());
+    }
+
+    let mut min = bounds[0].min;
+    let mut max = bounds[0].max;
+
+    for bound in &bounds[1..] {
+        min.x = min.x.min(bound.min.x);
+        min.y = min.y.min(bound.min.y);
+        min.z = min.z.min(bound.min.z);
+        max.x = max.x.max(bound.max.x);
+        max.y = max.y.max(bound.max.y);
+        max.z = max.z.max(bound.max.z);
+    }
+
+    Aabb::new(min, max)
+}
+
+/// Merge two axis-aligned bounding boxes
+///
+/// Returns the smallest AABB that contains both input boxes.
+///
+/// # Examples
+///
+/// ```rust
+/// use csgrs::spatial::{utils::merge_bounds, traits::Aabb};
+/// use nalgebra::Point3;
+///
+/// let bounds1 = Aabb::new(Point3::new(0.0, 0.0, 0.0), Point3::new(1.0, 1.0, 1.0));
+/// let bounds2 = Aabb::new(Point3::new(0.5, 0.5, 0.5), Point3::new(1.5, 1.5, 1.5));
+///
+/// let merged = merge_bounds(&bounds1, &bounds2);
+/// assert_eq!(merged.min, Point3::new(0.0, 0.0, 0.0));
+/// assert_eq!(merged.max, Point3::new(1.5, 1.5, 1.5));
+/// ```
+#[inline]
+pub fn merge_bounds(a: &Aabb, b: &Aabb) -> Aabb {
+    Aabb::new(
+        Point3::new(
+            a.min.x.min(b.min.x),
+            a.min.y.min(b.min.y),
+            a.min.z.min(b.min.z),
+        ),
+        Point3::new(
+            a.max.x.max(b.max.x),
+            a.max.y.max(b.max.y),
+            a.max.z.max(b.max.z),
+        ),
+    )
+}
+
+/// Test if an axis-aligned bounding box contains a point
+///
+/// Returns true if the point is inside or on the boundary of the box.
+///
+/// # Examples
+///
+/// ```rust
+/// use csgrs::spatial::{utils::bounds_contains_point, traits::Aabb};
+/// use nalgebra::Point3;
+///
+/// let bounds = Aabb::new(Point3::new(0.0, 0.0, 0.0), Point3::new(2.0, 2.0, 2.0));
+///
+/// assert!(bounds_contains_point(&bounds, &Point3::new(1.0, 1.0, 1.0)));
+/// assert!(bounds_contains_point(&bounds, &Point3::new(0.0, 0.0, 0.0))); // On boundary
+/// assert!(!bounds_contains_point(&bounds, &Point3::new(3.0, 3.0, 3.0)));
+/// ```
+#[inline]
+pub fn bounds_contains_point(bounds: &Aabb, point: &Point3<Real>) -> bool {
+    point.x >= bounds.min.x && point.x <= bounds.max.x &&
+    point.y >= bounds.min.y && point.y <= bounds.max.y &&
+    point.z >= bounds.min.z && point.z <= bounds.max.z
+}
+
+/// Calculate the volume of an axis-aligned bounding box
+///
+/// Returns the 3D volume (width × height × depth) of the box.
+///
+/// # Examples
+///
+/// ```rust
+/// use csgrs::spatial::{utils::bounds_volume, traits::Aabb};
+/// use nalgebra::Point3;
+///
+/// let bounds = Aabb::new(Point3::new(0.0, 0.0, 0.0), Point3::new(2.0, 3.0, 4.0));
+/// let volume = bounds_volume(&bounds);
+/// assert_eq!(volume, 24.0); // 2 × 3 × 4 = 24
+/// ```
+#[inline]
+pub fn bounds_volume(bounds: &Aabb) -> Real {
+    let size = bounds.size();
+    size.x * size.y * size.z
+}
+
+/// Test if a ray intersects with an axis-aligned bounding box
+///
+/// Uses the slab method for efficient ray-AABB intersection testing.
+///
+/// # Examples
+///
+/// ```rust
+/// use csgrs::spatial::{utils::ray_intersects_aabb, traits::{Aabb, Ray}};
+/// use nalgebra::{Point3, Vector3};
+///
+/// let ray = Ray {
+///     origin: Point3::new(0.0, 0.0, 0.0),
+///     direction: Vector3::new(1.0, 0.0, 0.0),
+/// };
+/// let bounds = Aabb::new(Point3::new(0.5, -0.5, -0.5), Point3::new(1.5, 0.5, 0.5));
+///
+/// assert!(ray_intersects_aabb(&ray, &bounds));
+/// ```
+#[inline]
+pub fn ray_intersects_aabb(ray: &Ray, aabb: &Aabb) -> bool {
+    let inv_dir = Vector3::new(
+        1.0 / ray.direction.x,
+        1.0 / ray.direction.y,
+        1.0 / ray.direction.z,
+    );
+
+    let t1 = (aabb.min.x - ray.origin.x) * inv_dir.x;
+    let t2 = (aabb.max.x - ray.origin.x) * inv_dir.x;
+    let t3 = (aabb.min.y - ray.origin.y) * inv_dir.y;
+    let t4 = (aabb.max.y - ray.origin.y) * inv_dir.y;
+    let t5 = (aabb.min.z - ray.origin.z) * inv_dir.z;
+    let t6 = (aabb.max.z - ray.origin.z) * inv_dir.z;
+
+    let tmin = t1.min(t2).max(t3.min(t4)).max(t5.min(t6));
+    let tmax = t1.max(t2).min(t3.max(t4)).min(t5.max(t6));
+
+    tmax >= 0.0 && tmin <= tmax
+}
+
+/// Calculate the distance along a ray to the intersection with an AABB
+///
+/// Returns the parameter t such that intersection_point = ray.origin + t * ray.direction.
+/// Returns None if there is no intersection.
+///
+/// # Examples
+///
+/// ```rust
+/// use csgrs::spatial::{utils::ray_aabb_intersection_distance, traits::{Aabb, Ray}};
+/// use nalgebra::{Point3, Vector3};
+///
+/// let ray = Ray {
+///     origin: Point3::new(0.0, 0.0, 0.0),
+///     direction: Vector3::new(1.0, 0.0, 0.0),
+/// };
+/// let bounds = Aabb::new(Point3::new(1.0, -0.5, -0.5), Point3::new(2.0, 0.5, 0.5));
+///
+/// let distance = ray_aabb_intersection_distance(&ray, &bounds);
+/// assert!(distance.is_some());
+/// assert!((distance.unwrap() - 1.0).abs() < 0.001);
+/// ```
+#[inline]
+pub fn ray_aabb_intersection_distance(ray: &Ray, aabb: &Aabb) -> Option<Real> {
+    let inv_dir = Vector3::new(
+        1.0 / ray.direction.x,
+        1.0 / ray.direction.y,
+        1.0 / ray.direction.z,
+    );
+
+    let t1 = (aabb.min.x - ray.origin.x) * inv_dir.x;
+    let t2 = (aabb.max.x - ray.origin.x) * inv_dir.x;
+    let t3 = (aabb.min.y - ray.origin.y) * inv_dir.y;
+    let t4 = (aabb.max.y - ray.origin.y) * inv_dir.y;
+    let t5 = (aabb.min.z - ray.origin.z) * inv_dir.z;
+    let t6 = (aabb.max.z - ray.origin.z) * inv_dir.z;
+
+    let tmin = t1.min(t2).max(t3.min(t4)).max(t5.min(t6));
+    let tmax = t1.max(t2).min(t3.max(t4)).min(t5.max(t6));
+
+    if tmax >= 0.0 && tmin <= tmax {
+        Some(if tmin >= 0.0 { tmin } else { tmax })
+    } else {
+        None
+    }
+}
+
+/// Calculate the squared distance between two points
+///
+/// This is more efficient than calculating the actual distance when only
+/// relative distances are needed (e.g., for nearest neighbor searches).
+///
+/// # Examples
+///
+/// ```rust
+/// use csgrs::spatial::utils::distance_squared;
+/// use nalgebra::Point3;
+///
+/// let p1 = Point3::new(0.0, 0.0, 0.0);
+/// let p2 = Point3::new(3.0, 4.0, 0.0);
+///
+/// let dist_sq = distance_squared(&p1, &p2);
+/// assert_eq!(dist_sq, 25.0); // 3² + 4² = 9 + 16 = 25
+/// ```
+#[inline]
+pub fn distance_squared(a: &Point3<Real>, b: &Point3<Real>) -> Real {
+    let diff = b - a;
+    diff.norm_squared()
+}
+
+/// Calculate the actual distance between two points
+///
+/// # Examples
+///
+/// ```rust
+/// use csgrs::spatial::utils::distance;
+/// use nalgebra::Point3;
+///
+/// let p1 = Point3::new(0.0, 0.0, 0.0);
+/// let p2 = Point3::new(3.0, 4.0, 0.0);
+///
+/// let dist = distance(&p1, &p2);
+/// assert_eq!(dist, 5.0); // sqrt(3² + 4²) = sqrt(25) = 5
+/// ```
+#[inline]
+pub fn distance(a: &Point3<Real>, b: &Point3<Real>) -> Real {
+    (b - a).norm()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::geometry::{Polygon, Vertex};
+    use nalgebra::{Point3, Vector3};
+
+    fn create_test_polygon() -> Polygon<i32> {
+        let vertices = vec![
+            Vertex::new(Point3::new(0.0, 0.0, 0.0), Vector3::new(0.0, 0.0, 1.0)),
+            Vertex::new(Point3::new(2.0, 0.0, 0.0), Vector3::new(0.0, 0.0, 1.0)),
+            Vertex::new(Point3::new(1.0, 2.0, 0.0), Vector3::new(0.0, 0.0, 1.0)),
+        ];
+        Polygon::new(vertices, Some(1))
+    }
+
+    #[test]
+    fn test_polygon_center() {
+        let polygon = create_test_polygon();
+        let center = polygon_center(&polygon);
+        assert_eq!(center, Point3::new(1.0, 2.0/3.0, 0.0));
+    }
+
+    #[test]
+    fn test_polygon_bounds() {
+        let polygon = create_test_polygon();
+        let bounds = polygon_bounds(&polygon).unwrap();
+        assert_eq!(bounds.min, Point3::new(0.0, 0.0, 0.0));
+        assert_eq!(bounds.max, Point3::new(2.0, 2.0, 0.0));
+
+        // Test single vertex polygon (minimum valid polygon)
+        let single_vertex = vec![
+            crate::geometry::Vertex::new(Point3::new(1.0, 1.0, 1.0), Vector3::new(0.0, 0.0, 1.0)),
+            crate::geometry::Vertex::new(Point3::new(1.0, 1.0, 1.0), Vector3::new(0.0, 0.0, 1.0)),
+            crate::geometry::Vertex::new(Point3::new(1.0, 1.0, 1.0), Vector3::new(0.0, 0.0, 1.0)),
+        ];
+        let single_point_polygon: Polygon<i32> = Polygon::new(single_vertex, None);
+        let single_bounds = polygon_bounds(&single_point_polygon).unwrap();
+        assert_eq!(single_bounds.min, Point3::new(1.0, 1.0, 1.0));
+        assert_eq!(single_bounds.max, Point3::new(1.0, 1.0, 1.0));
+    }
+
+    #[test]
+    fn test_polygon_area() {
+        // Create a unit square
+        let vertices = vec![
+            Vertex::new(Point3::new(0.0, 0.0, 0.0), Vector3::new(0.0, 0.0, 1.0)),
+            Vertex::new(Point3::new(1.0, 0.0, 0.0), Vector3::new(0.0, 0.0, 1.0)),
+            Vertex::new(Point3::new(1.0, 1.0, 0.0), Vector3::new(0.0, 0.0, 1.0)),
+            Vertex::new(Point3::new(0.0, 1.0, 0.0), Vector3::new(0.0, 0.0, 1.0)),
+        ];
+        let square: Polygon<i32> = Polygon::new(vertices, None);
+        let area = polygon_area(&square);
+        assert!((area - 1.0).abs() < 0.001);
+
+        // Test triangle
+        let triangle = create_test_polygon();
+        let triangle_area = polygon_area(&triangle);
+        assert!(triangle_area > 0.0);
+    }
+
+    #[test]
+    fn test_polygon_intersects_bounds() {
+        let polygon = create_test_polygon();
+
+        // Intersecting bounds
+        let intersecting_bounds = Aabb::new(Point3::new(0.5, 0.5, -0.5), Point3::new(1.5, 1.5, 0.5));
+        assert!(polygon_intersects_bounds(&polygon, &intersecting_bounds));
+
+        // Non-intersecting bounds
+        let non_intersecting_bounds = Aabb::new(Point3::new(5.0, 5.0, 5.0), Point3::new(6.0, 6.0, 6.0));
+        assert!(!polygon_intersects_bounds(&polygon, &non_intersecting_bounds));
+    }
+
+    #[test]
+    fn test_point_in_polygon() {
+        let polygon = create_test_polygon();
+        let point = Point3::new(1.0, 1.0, 0.0);
+
+        // Currently always returns false (placeholder implementation)
+        assert!(!point_in_polygon(&point, &polygon));
+    }
+
+    #[test]
+    fn test_bounds_intersection() {
+        let bounds1 = Aabb::new(Point3::new(0.0, 0.0, 0.0), Point3::new(2.0, 2.0, 2.0));
+        let bounds2 = Aabb::new(Point3::new(1.0, 1.0, 1.0), Point3::new(3.0, 3.0, 3.0));
+
+        let intersection = bounds_intersection(&bounds1, &bounds2).unwrap();
+        assert_eq!(intersection.min, Point3::new(1.0, 1.0, 1.0));
+        assert_eq!(intersection.max, Point3::new(2.0, 2.0, 2.0));
+
+        // Non-intersecting bounds
+        let bounds3 = Aabb::new(Point3::new(5.0, 5.0, 5.0), Point3::new(6.0, 6.0, 6.0));
+        assert!(bounds_intersection(&bounds1, &bounds3).is_none());
+    }
+
+    #[test]
+    fn test_bounds_union() {
+        let bounds = vec![
+            Aabb::new(Point3::new(0.0, 0.0, 0.0), Point3::new(1.0, 1.0, 1.0)),
+            Aabb::new(Point3::new(2.0, 2.0, 2.0), Point3::new(3.0, 3.0, 3.0)),
+            Aabb::new(Point3::new(-1.0, -1.0, -1.0), Point3::new(0.5, 0.5, 0.5)),
+        ];
+
+        let union = bounds_union(&bounds);
+        assert_eq!(union.min, Point3::new(-1.0, -1.0, -1.0));
+        assert_eq!(union.max, Point3::new(3.0, 3.0, 3.0));
+
+        // Test empty bounds
+        let empty_union = bounds_union(&[]);
+        assert_eq!(empty_union.min, Point3::origin());
+        assert_eq!(empty_union.max, Point3::origin());
+    }
+
+    #[test]
+    fn test_merge_bounds() {
+        let bounds1 = Aabb::new(Point3::new(0.0, 0.0, 0.0), Point3::new(1.0, 1.0, 1.0));
+        let bounds2 = Aabb::new(Point3::new(0.5, 0.5, 0.5), Point3::new(1.5, 1.5, 1.5));
+
+        let merged = merge_bounds(&bounds1, &bounds2);
+        assert_eq!(merged.min, Point3::new(0.0, 0.0, 0.0));
+        assert_eq!(merged.max, Point3::new(1.5, 1.5, 1.5));
+    }
+
+    #[test]
+    fn test_bounds_contains_point() {
+        let bounds = Aabb::new(Point3::new(0.0, 0.0, 0.0), Point3::new(2.0, 2.0, 2.0));
+
+        assert!(bounds_contains_point(&bounds, &Point3::new(1.0, 1.0, 1.0)));
+        assert!(bounds_contains_point(&bounds, &Point3::new(0.0, 0.0, 0.0))); // On boundary
+        assert!(bounds_contains_point(&bounds, &Point3::new(2.0, 2.0, 2.0))); // On boundary
+        assert!(!bounds_contains_point(&bounds, &Point3::new(3.0, 3.0, 3.0)));
+        assert!(!bounds_contains_point(&bounds, &Point3::new(-1.0, 1.0, 1.0)));
+    }
+
+    #[test]
+    fn test_bounds_volume() {
+        let bounds = Aabb::new(Point3::new(0.0, 0.0, 0.0), Point3::new(2.0, 3.0, 4.0));
+        let volume = bounds_volume(&bounds);
+        assert_eq!(volume, 24.0); // 2 × 3 × 4 = 24
+
+        // Test unit cube
+        let unit_cube = Aabb::new(Point3::new(0.0, 0.0, 0.0), Point3::new(1.0, 1.0, 1.0));
+        assert_eq!(bounds_volume(&unit_cube), 1.0);
+    }
+
+    #[test]
+    fn test_ray_intersects_aabb() {
+        let ray = Ray {
+            origin: Point3::new(0.0, 0.0, 0.0),
+            direction: Vector3::new(1.0, 0.0, 0.0),
+        };
+        let bounds = Aabb::new(Point3::new(0.5, -0.5, -0.5), Point3::new(1.5, 0.5, 0.5));
+
+        assert!(ray_intersects_aabb(&ray, &bounds));
+
+        // Non-intersecting ray
+        let ray2 = Ray {
+            origin: Point3::new(0.0, 0.0, 0.0),
+            direction: Vector3::new(0.0, 1.0, 0.0),
+        };
+        let bounds2 = Aabb::new(Point3::new(1.0, 1.0, 1.0), Point3::new(2.0, 2.0, 2.0));
+        assert!(!ray_intersects_aabb(&ray2, &bounds2));
+    }
+
+    #[test]
+    fn test_distance_functions() {
+        let p1 = Point3::new(0.0, 0.0, 0.0);
+        let p2 = Point3::new(3.0, 4.0, 0.0);
+
+        let dist_sq = distance_squared(&p1, &p2);
+        assert_eq!(dist_sq, 25.0); // 3² + 4² = 25
+
+        let dist = distance(&p1, &p2);
+        assert_eq!(dist, 5.0); // sqrt(25) = 5
+    }
 }

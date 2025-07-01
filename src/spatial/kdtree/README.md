@@ -256,6 +256,65 @@ for &distance_threshold in &detail_levels {
 }
 ```
 
+## Polymorphic Usage with SpatialIndex Trait
+
+KD-trees implement the `SpatialIndex` trait, enabling polymorphic usage alongside BSP trees and Octrees:
+
+```rust
+use csgrs::spatial::{SpatialIndex, SpatialStructureFactory, QueryType};
+
+// Create KD-tree as trait object
+let kdtree: Box<dyn SpatialIndex<i32>> = SpatialStructureFactory::create_kdtree(&polygons);
+
+// Use polymorphically with other structures
+fn analyze_structure<S: Clone + Send + Sync + std::fmt::Debug>(
+    structure: &dyn SpatialIndex<S>
+) -> usize {
+    structure.statistics().node_count
+}
+
+let node_count = analyze_structure(kdtree.as_ref());
+
+// Automatic optimal selection for point queries
+let optimal_structure = SpatialStructureFactory::create_optimal(&polygons, QueryType::PointLocation);
+// Will likely choose KD-tree for point-based operations
+```
+
+This enables writing generic spatial algorithms that work with any spatial structure type.
+
+### Configuration Examples
+
+```rust
+use csgrs::spatial::{SpatialConfig, SpatialStructureFactory};
+use csgrs::geometry::{Polygon, Vertex};
+use nalgebra::{Point3, Vector3};
+
+// Create test data
+let vertices = vec![
+    Vertex::new(Point3::new(0.0, 0.0, 0.0), Vector3::new(0.0, 0.0, 1.0)),
+    Vertex::new(Point3::new(1.0, 0.0, 0.0), Vector3::new(0.0, 0.0, 1.0)),
+    Vertex::new(Point3::new(0.5, 1.0, 0.0), Vector3::new(0.0, 0.0, 1.0)),
+];
+let polygon: Polygon<i32> = Polygon::new(vertices, None);
+let polygons = vec![polygon];
+
+// Use predefined configuration optimized for point queries
+let point_config = SpatialConfig::for_point_queries();
+let kdtree = SpatialStructureFactory::create_kdtree_with_config(&polygons, &point_config);
+
+// Customize configuration for specific needs
+let mut custom_config = SpatialConfig::for_point_queries();
+custom_config.max_depth = 15;
+custom_config.max_polygons_per_leaf = 3;
+custom_config.use_sah = true;
+
+let custom_kdtree = SpatialStructureFactory::create_kdtree_with_config(&polygons, &custom_config);
+
+// Both trees work with the same interface
+assert_eq!(kdtree.all_polygons().len(), 1);
+assert_eq!(custom_kdtree.all_polygons().len(), 1);
+```
+
 ## Best Practices
 
 ### When to Use KD-Trees

@@ -6,8 +6,7 @@ use crate::spatial::traits::{Aabb, SpatialIndex, SpatialStatistics};
 use nalgebra::Point3;
 use std::fmt::Debug;
 
-#[cfg(feature = "parallel")]
-use rayon::join;
+
 
 /// Octant indices for the 8 children of an octree node
 #[derive(Debug, Clone, Copy, PartialEq)]
@@ -141,7 +140,7 @@ impl<S: Clone + Send + Sync + Debug> Node<S> {
     pub fn node_count(&self) -> usize {
         let mut count = 1;
         for child in &self.children {
-            if let Some(ref child_node) = child {
+            if let Some(child_node) = child {
                 count += child_node.node_count();
             }
         }
@@ -152,7 +151,7 @@ impl<S: Clone + Send + Sync + Debug> Node<S> {
     pub fn polygon_count(&self) -> usize {
         let mut count = self.polygons.len();
         for child in &self.children {
-            if let Some(ref child_node) = child {
+            if let Some(child_node) = child {
                 count += child_node.polygon_count();
             }
         }
@@ -169,7 +168,7 @@ impl<S: Clone + Send + Sync + Debug> Node<S> {
 
             // Add child nodes to stack
             for child in &node.children {
-                if let Some(ref child_node) = child {
+                if let Some(child_node) = child {
                     stack.push(child_node.as_ref());
                 }
             }
@@ -251,7 +250,7 @@ impl<S: Clone + Send + Sync + Debug> Node<S> {
         
         // Add child memory
         for child in &self.children {
-            if let Some(ref child_node) = child {
+            if let Some(child_node) = child {
                 size += child_node.memory_usage();
             }
         }
@@ -294,7 +293,7 @@ impl<S: Clone + Send + Sync + Debug> SpatialIndex<S> for Node<S> {
 
         // Recursively search children
         for child in &self.children {
-            if let Some(ref child_node) = child {
+            if let Some(child_node) = child {
                 if let Some(candidate) = child_node.nearest_neighbor(point) {
                     let center = Self::polygon_center(candidate);
                     let distance_squared = (point - center).norm_squared();
@@ -329,7 +328,7 @@ impl<S: Clone + Send + Sync + Debug> SpatialIndex<S> for Node<S> {
 
         // Recursively check children
         for child in &self.children {
-            if let Some(ref child_node) = child {
+            if let Some(child_node) = child {
                 if child_node.contains_point(point) {
                     return true;
                 }
@@ -377,7 +376,7 @@ impl<S: Clone + Send + Sync + Debug> Node<S> {
 
         // Recursively check children
         for child in &self.children {
-            if let Some(ref child_node) = child {
+            if let Some(child_node) = child {
                 child_node.ray_intersections_recursive(ray, intersections);
             }
         }
@@ -385,25 +384,7 @@ impl<S: Clone + Send + Sync + Debug> Node<S> {
 
     /// Check if a ray intersects with an AABB (same as KD-tree implementation)
     fn ray_intersects_aabb(&self, ray: &crate::spatial::traits::Ray, aabb: &Aabb) -> bool {
-        use nalgebra::Vector3;
-        
-        let inv_dir = Vector3::new(
-            1.0 / ray.direction.x,
-            1.0 / ray.direction.y,
-            1.0 / ray.direction.z,
-        );
-
-        let t1 = (aabb.min.x - ray.origin.x) * inv_dir.x;
-        let t2 = (aabb.max.x - ray.origin.x) * inv_dir.x;
-        let t3 = (aabb.min.y - ray.origin.y) * inv_dir.y;
-        let t4 = (aabb.max.y - ray.origin.y) * inv_dir.y;
-        let t5 = (aabb.min.z - ray.origin.z) * inv_dir.z;
-        let t6 = (aabb.max.z - ray.origin.z) * inv_dir.z;
-
-        let tmin = t1.min(t2).max(t3.min(t4)).max(t5.min(t6));
-        let tmax = t1.max(t2).min(t3.max(t4)).min(t5.max(t6));
-
-        tmax >= 0.0 && tmin <= tmax
+        crate::spatial::utils::ray_intersects_aabb(ray, aabb)
     }
 
     /// Calculate ray-polygon intersection (simplified)

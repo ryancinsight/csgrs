@@ -1,17 +1,23 @@
 //! Demonstration of intelligent spatial structure integration with CSG operations
-//! 
+//!
 //! This example showcases how the CSG module can leverage the unified spatial indexing
 //! system for automatic performance optimization while maintaining complete API compatibility.
 
-use csgrs::{CSG, Real};
-use csgrs::spatial::{SpatialStructureFactory, QueryType, SpatialIndex};
+use csgrs::CSG;
+use csgrs::spatial::{SpatialStructureFactory, QueryType};
 use nalgebra::{Point3, Vector3};
 use std::time::Instant;
+use std::fs;
 
 type CSGShape = CSG<()>;
 
 fn main() {
     println!("=== Spatial Structure Integration with CSG Operations ===\n");
+
+    // Define output directory for this example
+    let out_dir = "outputs";
+    let example_dir = "14-spatial-integration";
+    fs::create_dir_all(format!("{}/{}", out_dir, example_dir)).unwrap();
 
     // Create test geometries
     let cube = CSGShape::cube(2.0, None).center();
@@ -23,11 +29,28 @@ fn main() {
     println!("- Sphere: {} polygons", sphere.polygons.len());
     println!("- Cylinder: {} polygons\n", cylinder.polygons.len());
 
+    // Export base geometries
+    #[cfg(feature = "stl-io")]
+    {
+        let _ = fs::write(
+            format!("{}/{}/cube_base.stl", out_dir, example_dir),
+            cube.to_stl_binary("cube_base").unwrap(),
+        );
+        let _ = fs::write(
+            format!("{}/{}/sphere_base.stl", out_dir, example_dir),
+            sphere.to_stl_binary("sphere_base").unwrap(),
+        );
+        let _ = fs::write(
+            format!("{}/{}/cylinder_base.stl", out_dir, example_dir),
+            cylinder.to_stl_binary("cylinder_base").unwrap(),
+        );
+    }
+
     // Demonstrate spatial structure selection for different query types
     demonstrate_spatial_structure_selection(&cube);
 
     // Demonstrate CSG operations with spatial acceleration potential
-    demonstrate_csg_operations(&cube, &sphere, &cylinder);
+    demonstrate_csg_operations(&cube, &sphere, &cylinder, &out_dir, &example_dir);
 
     // Demonstrate ray intersection optimization
     demonstrate_ray_intersection_optimization(&cube);
@@ -38,6 +61,7 @@ fn main() {
     println!("=== Integration Complete ===");
     println!("The CSG module now has the foundation for intelligent spatial acceleration!");
     println!("Future enhancements will enable automatic 2-10x performance improvements.");
+    println!("STL files exported to: {}/{}/", out_dir, example_dir);
 }
 
 fn demonstrate_spatial_structure_selection(cube: &CSGShape) {
@@ -66,32 +90,60 @@ fn demonstrate_spatial_structure_selection(cube: &CSGShape) {
     println!();
 }
 
-fn demonstrate_csg_operations(cube: &CSGShape, sphere: &CSGShape, cylinder: &CSGShape) {
+fn demonstrate_csg_operations(cube: &CSGShape, sphere: &CSGShape, cylinder: &CSGShape, out_dir: &str, example_dir: &str) {
     println!("--- CSG Operations with Spatial Acceleration Foundation ---");
-    
-    // Time the boolean operations
-    let operations = [
-        ("Union", || cube.union(sphere)),
-        ("Difference", || cube.difference(sphere)),
-        ("Intersection", || cube.intersection(sphere)),
-    ];
 
-    for (name, operation) in &operations {
-        let start = Instant::now();
-        let result = operation();
-        let duration = start.elapsed();
-        
-        println!("  {} -> {} polygons ({:.2}ms)", 
-                name, result.polygons.len(), duration.as_secs_f64() * 1000.0);
-    }
+    // Time the boolean operations and export STL files
+    let start = Instant::now();
+    let union_result = cube.union(sphere);
+    let union_duration = start.elapsed();
+    println!("  Union -> {} polygons ({:.2}ms)",
+            union_result.polygons.len(), union_duration.as_secs_f64() * 1000.0);
+
+    #[cfg(feature = "stl-io")]
+    let _ = fs::write(
+        format!("{}/{}/union_cube_sphere.stl", out_dir, example_dir),
+        union_result.to_stl_binary("union_cube_sphere").unwrap(),
+    );
+
+    let start = Instant::now();
+    let difference_result = cube.difference(sphere);
+    let difference_duration = start.elapsed();
+    println!("  Difference -> {} polygons ({:.2}ms)",
+            difference_result.polygons.len(), difference_duration.as_secs_f64() * 1000.0);
+
+    #[cfg(feature = "stl-io")]
+    let _ = fs::write(
+        format!("{}/{}/difference_cube_sphere.stl", out_dir, example_dir),
+        difference_result.to_stl_binary("difference_cube_sphere").unwrap(),
+    );
+
+    let start = Instant::now();
+    let intersection_result = cube.intersection(sphere);
+    let intersection_duration = start.elapsed();
+    println!("  Intersection -> {} polygons ({:.2}ms)",
+            intersection_result.polygons.len(), intersection_duration.as_secs_f64() * 1000.0);
+
+    #[cfg(feature = "stl-io")]
+    let _ = fs::write(
+        format!("{}/{}/intersection_cube_sphere.stl", out_dir, example_dir),
+        intersection_result.to_stl_binary("intersection_cube_sphere").unwrap(),
+    );
 
     // Complex operation combining multiple CSG operations
     let start = Instant::now();
     let complex_result = cube.union(sphere).difference(cylinder);
     let complex_duration = start.elapsed();
-    
-    println!("  Complex (Union + Difference) -> {} polygons ({:.2}ms)", 
+
+    println!("  Complex (Union + Difference) -> {} polygons ({:.2}ms)",
             complex_result.polygons.len(), complex_duration.as_secs_f64() * 1000.0);
+
+    #[cfg(feature = "stl-io")]
+    let _ = fs::write(
+        format!("{}/{}/complex_union_difference.stl", out_dir, example_dir),
+        complex_result.to_stl_binary("complex_union_difference").unwrap(),
+    );
+
     println!();
 }
 

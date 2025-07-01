@@ -14,7 +14,6 @@ use std::sync::OnceLock;
 #[cfg(feature = "parallel")]
 use rayon::prelude::*;
 
-pub mod bsp;
 pub mod distribute;
 pub mod interop;
 pub mod mesh;

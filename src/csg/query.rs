@@ -5,6 +5,8 @@ use crate::core::float_types::parry3d::{
     shape::Triangle,
 };
 use crate::core::float_types::{EPSILON, Real};
+// TODO: Re-enable when spatial integration is complete
+// use crate::spatial::{SpatialStructureFactory, QueryType};
 use geo::BoundingRect;
 use nalgebra::{Isometry3, Point3, Vector3, partial_max, partial_min};
 use std::fmt::Debug;
@@ -27,8 +29,19 @@ impl<S: Clone + Debug + Send + Sync> CSG<S> {
         origin: &Point3<Real>,
         direction: &Vector3<Real>,
     ) -> Vec<(Point3<Real>, Real)> {
+        // For now, use the original implementation to maintain compatibility
+        // Future enhancement: integrate BVH acceleration when S: 'static is available
+        self.ray_intersections_impl(origin, direction)
+    }
+
+    /// Internal implementation of ray intersections
+    fn ray_intersections_impl(
+        &self,
+        origin: &Point3<Real>,
+        direction: &Vector3<Real>,
+    ) -> Vec<(Point3<Real>, Real)> {
         let ray = Ray::new(*origin, *direction);
-        let iso = Isometry3::identity(); // No transformation on the triangles themselves.
+        let iso = Isometry3::identity();
 
         let mut hits: Vec<_> = self
             .polygons
@@ -48,13 +61,15 @@ impl<S: Clone + Debug + Send + Sync> CSG<S> {
             })
             .collect();
 
-        // 4) Sort hits by ascending distance (toi):
+        // Sort hits by ascending distance (toi):
         hits.sort_by(|a, b| a.1.partial_cmp(&b.1).unwrap_or(std::cmp::Ordering::Equal));
-        // 5) remove duplicate hits if they fall within tolerance
+        // Remove duplicate hits if they fall within tolerance
         hits.dedup_by(|a, b| (a.1 - b.1).abs() < EPSILON);
 
         hits
     }
+
+
 
     /// Returns a [`parry3d::bounding_volume::Aabb`] by merging:
     /// 1. The 3D bounds of all `polygons`.
