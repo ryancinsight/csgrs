@@ -103,6 +103,8 @@ impl<S: Clone + Debug + Send + Sync> CSG<S> {
                 }
                 // Recompute polygon plane and normals after smoothing
                 polygon.set_new_normal();
+                // Invalidate the cached bounding box since vertex positions have changed
+                polygon.invalidate_bounding_box();
             }
 
             // Progress feedback for long smoothing operations

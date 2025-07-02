@@ -55,6 +55,11 @@ impl<S: Clone + Send + Sync> Polygon<S> {
         })
     }
 
+    /// Invalidate the cached bounding box, forcing it to be recomputed on next access
+    pub fn invalidate_bounding_box(&mut self) {
+        self.bounding_box = OnceLock::new();
+    }
+
     /// Reverses winding order, flips vertices normals, and flips the plane normal
     pub fn flip(&mut self) {
         // 1) reverse vertices
@@ -65,6 +70,7 @@ impl<S: Clone + Send + Sync> Polygon<S> {
         }
         // 3) flip the cached plane too
         self.plane.flip();
+        // Note: flip() doesn't change vertex positions, so bounding box remains valid
     }
 
     /// Return an iterator over paired vertices each forming an edge of the polygon

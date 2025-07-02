@@ -84,6 +84,9 @@ impl<S: Clone + Debug + Send + Sync> CSG<S> {
 
             // Reconstruct plane from transformed vertices for consistency
             poly.plane = Plane::from_vertices(poly.vertices.clone());
+
+            // Invalidate the cached bounding box since vertex positions have changed
+            poly.invalidate_bounding_box();
         }
 
         // Convert the top-left 2×2 submatrix + translation of a 4×4 into a geo::AffineTransform

@@ -1278,6 +1278,45 @@ fn test_transform_metadata() {
 }
 
 #[test]
+fn test_polygon_bounding_box_invalidation() {
+    // Test that polygon bounding box is properly invalidated after transformations
+    let mut poly: Polygon<()> = Polygon::new(
+        vec![
+            Vertex::new(Point3::new(0.0, 0.0, 0.0), Vector3::z()),
+            Vertex::new(Point3::new(1.0, 0.0, 0.0), Vector3::z()),
+            Vertex::new(Point3::new(0.0, 1.0, 0.0), Vector3::z()),
+        ],
+        None,
+    );
+
+    // Get initial bounding box
+    let initial_bb = poly.bounding_box();
+    assert!(approx_eq(initial_bb.mins.x, 0.0, EPSILON));
+    assert!(approx_eq(initial_bb.mins.y, 0.0, EPSILON));
+    assert!(approx_eq(initial_bb.maxs.x, 1.0, EPSILON));
+    assert!(approx_eq(initial_bb.maxs.y, 1.0, EPSILON));
+
+    // Test manual invalidation
+    poly.invalidate_bounding_box();
+    let bb_after_invalidation = poly.bounding_box();
+    // Should be the same since vertices haven't changed
+    assert!(approx_eq(bb_after_invalidation.mins.x, 0.0, EPSILON));
+    assert!(approx_eq(bb_after_invalidation.maxs.x, 1.0, EPSILON));
+
+    // Test that CSG transformations properly invalidate polygon bounding boxes
+    let csg = CSG::from_polygons(&[poly]);
+    let translated_csg = csg.translate(5.0, 3.0, 0.0);
+
+    // Check that the polygon's bounding box reflects the transformation
+    let translated_poly = &translated_csg.polygons[0];
+    let translated_bb = translated_poly.bounding_box();
+    assert!(approx_eq(translated_bb.mins.x, 5.0, EPSILON));
+    assert!(approx_eq(translated_bb.mins.y, 3.0, EPSILON));
+    assert!(approx_eq(translated_bb.maxs.x, 6.0, EPSILON));
+    assert!(approx_eq(translated_bb.maxs.y, 4.0, EPSILON));
+}
+
+#[test]
 fn test_complex_metadata_struct_in_boolean_ops() {
     // We'll do an operation using a custom struct to verify it remains intact.
     // We'll do a union for instance.
