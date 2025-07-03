@@ -102,6 +102,21 @@ fn main() {
             .unwrap(),
     );
 
+    // XOR (Exclusive OR) operation: A ∪ B - A ∩ B
+    // This produces only the non-overlapping portions of both shapes
+    let xor_shape = base_cube.xor(&tool_sphere);
+    #[cfg(feature = "stl-io")]
+    let _ = fs::write(
+        format!("{}/03-booleans/xor_cube_sphere.stl", out_dir),
+        xor_shape.to_stl_binary("xor_cube_sphere").unwrap(),
+    );
+
+    println!("Boolean operations completed:");
+    println!("  Union: {} polygons", union_shape.polygons.len());
+    println!("  Difference: {} polygons", subtract_shape.polygons.len());
+    println!("  Intersection: {} polygons", intersect_shape.polygons.len());
+    println!("  XOR: {} polygons", xor_shape.polygons.len());
+
     // 4) Convex hull
     #[cfg(feature = "chull-io")]
     let hull_of_union = union_shape.convex_hull();

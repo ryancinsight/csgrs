@@ -357,14 +357,26 @@ impl Plane {
                     // If the edge between these two vertices crosses the plane,
                     // compute intersection and add that intersection to both sets
                     if (type_i | type_j) == SPANNING {
-                        let denom = normal.dot(&(vertex_j.pos - vertex_i.pos));
-                        // Avoid dividing by zero
-                        if denom.abs() > EPSILON {
-                            let intersection =
-                                (self.offset() - normal.dot(&vertex_i.pos.coords)) / denom;
-                            let vertex_new = vertex_i.interpolate(vertex_j, intersection);
-                            split_front.push(vertex_new.clone());
-                            split_back.push(vertex_new);
+                        let edge_vector = vertex_j.pos - vertex_i.pos;
+                        let denom = normal.dot(&edge_vector);
+
+                        // Avoid dividing by zero with a more conservative threshold
+                        if denom.abs() > EPSILON * 10.0 {
+                            // Improved intersection calculation with better numerical stability
+                            let numerator = self.offset() - normal.dot(&vertex_i.pos.coords);
+                            let intersection = numerator / denom;
+
+                            // Clamp intersection parameter to [0,1] to avoid extrapolation
+                            let intersection_clamped = intersection.clamp(0.0, 1.0);
+
+                            let vertex_new = vertex_i.interpolate(vertex_j, intersection_clamped);
+
+                            // Verify that the intersection vertex is actually on the plane
+                            let distance_to_plane = normal.dot(&vertex_new.pos.coords) - self.offset();
+                            if distance_to_plane.abs() < EPSILON * 5.0 {
+                                split_front.push(vertex_new.clone());
+                                split_back.push(vertex_new);
+                            }
                         }
                     }
                 }

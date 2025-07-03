@@ -2,9 +2,10 @@ use crate::core::float_types::parry3d::bounding_volume::Aabb;
 use crate::core::float_types::{PI, Real};
 use crate::geometry::Plane;
 use crate::geometry::Vertex;
-use geo::{LineString, Polygon as GeoPolygon, coord};
+
 use nalgebra::{Point2, Point3, Vector3};
 use std::sync::OnceLock;
+use geo::{LineString, Polygon as GeoPolygon, coord};
 
 /// A polygon, defined by a list of vertices.
 /// - `S` is the generic metadata type, stored as `Option<S>`.
@@ -59,7 +60,27 @@ impl<S: Clone + Send + Sync> Polygon<S> {
     pub fn invalidate_bounding_box(&mut self) {
         self.bounding_box = OnceLock::new();
     }
+}
 
+/// Build an orthonormal basis from a normal vector for 2D projection
+pub fn build_orthonormal_basis(normal: &Vector3<Real>) -> (Vector3<Real>, Vector3<Real>) {
+    // Choose a vector that's not parallel to the normal
+    let temp = if normal.x.abs() < 0.9 {
+        Vector3::x()
+    } else {
+        Vector3::y()
+    };
+
+    // Create first basis vector perpendicular to normal
+    let u = normal.cross(&temp).normalize();
+
+    // Create second basis vector perpendicular to both normal and u
+    let v = normal.cross(&u).normalize();
+
+    (u, v)
+}
+
+impl<S: Clone + Send + Sync> Polygon<S> {
     /// Reverses winding order, flips vertices normals, and flips the plane normal
     pub fn flip(&mut self) {
         // 1) reverse vertices
@@ -121,7 +142,7 @@ impl<S: Clone + Send + Sync> Polygon<S> {
         }
 
         let normal_3d = self.plane.normal().normalize();
-        let (u, v) = build_orthonormal_basis(normal_3d);
+        let (u, v) = build_orthonormal_basis(&normal_3d);
         let origin_3d = self.vertices[0].pos;
 
         #[cfg(feature = "earcut")]
@@ -365,30 +386,8 @@ impl<S: Clone + Send + Sync> Polygon<S> {
     }
 }
 
-/// Given a normal vector `n`, build two perpendicular unit vectors `u` and `v` so that
-/// {u, v, n} forms an orthonormal basis. `n` is assumed non‐zero.
-pub fn build_orthonormal_basis(n: Vector3<Real>) -> (Vector3<Real>, Vector3<Real>) {
-    // Normalize the given normal
-    let n = n.normalize();
 
-    // Pick a vector that is not parallel to `n`. For instance, pick the axis
-    // which has the smallest absolute component in `n`, and cross from there.
-    // Because crossing with that is least likely to cause numeric issues.
-    let other = if n.x.abs() < n.y.abs() && n.x.abs() < n.z.abs() {
-        Vector3::x()
-    } else if n.y.abs() < n.z.abs() {
-        Vector3::y()
-    } else {
-        Vector3::z()
-    };
 
-    // v = n × other
-    let v = n.cross(&other).normalize();
-    // u = v × n
-    let u = v.cross(&n).normalize();
-
-    (u, v)
-}
 
 // Helper function to subdivide a triangle
 pub fn subdivide_triangle(tri: [Vertex; 3]) -> Vec<[Vertex; 3]> {

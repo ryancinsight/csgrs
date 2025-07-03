@@ -250,9 +250,11 @@ impl<S: Clone + Debug + Send + Sync> CSG<S> {
             }
         }
 
-        // Final pass to recompute normals
+        // Final pass to recompute normals and invalidate bounding boxes
         for polygon in &mut smoothed_polygons {
             polygon.set_new_normal();
+            // Invalidate the cached bounding box since vertex positions have changed
+            polygon.invalidate_bounding_box();
         }
 
         CSG::from_polygons(&smoothed_polygons)
