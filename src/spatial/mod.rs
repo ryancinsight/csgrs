@@ -38,9 +38,10 @@ pub use bsp::Node as BspNode;
 pub use kdtree::Node as KdTreeNode;
 pub use octree::Node as OctreeNode;
 
-// Re-export common traits and utilities
+// Re-export common traits and utilities from the new modular structure
 pub use traits::{
-    SpatialIndex, Aabb, Ray, Intersection, SpatialStructureSelector, QueryType,
-    SpatialStructureType, PerformanceMatrix, SpatialBenchmark, BenchmarkResults,
-    SpatialStructureFactory, SpatialConfig, SpatialError, SpatialResult
+    SpatialError, SpatialResult, Aabb, Ray, Intersection, SpatialIndex, SpatialStatistics,
+    DatasetCharacteristics, SpatialConfig, QueryType, SpatialDistribution, SpatialStructureType,
+    SpatialStructureFactory, SpatialStructureSelector, SpatialBenchmark, BenchmarkResults,
+    PerformanceMatrix, StructurePerformance, PerformanceRating
 };

@@ -131,6 +131,22 @@ impl<S: Clone + Send + Sync + Debug> Node<S> {
         count
     }
 
+    /// Count the number of leaf nodes in this subtree
+    pub fn leaf_count(&self) -> usize {
+        if self.front.is_none() && self.back.is_none() {
+            1 // This is a leaf
+        } else {
+            let mut count = 0;
+            if let Some(ref front) = self.front {
+                count += front.leaf_count();
+            }
+            if let Some(ref back) = self.back {
+                count += back.leaf_count();
+            }
+            count
+        }
+    }
+
     /// Estimate memory usage of this subtree in bytes
     pub fn memory_usage(&self) -> usize {
         let mut size = std::mem::size_of::<Self>();
