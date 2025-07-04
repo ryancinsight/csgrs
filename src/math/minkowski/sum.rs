@@ -212,13 +212,56 @@ fn compute_vertex_sums(state: &mut MinkowskiState) -> MinkowskiResult<()> {
 
     state.sum_points = Vec::with_capacity(expected_capacity);
 
-    // Compute Minkowski sum using optimized iterator pattern
+    // Compute Minkowski sum using advanced iterator patterns for Cartesian product
     // Mathematical theorem: A ⊕ B = {a + b | a ∈ A, b ∈ B}
-    for a in &state.vertices_a {
-        for b in &state.vertices_b {
-            state.sum_points.push(a + b.coords);
-            state.metrics.vertex_pairs_processed += 1;
+
+    #[cfg(feature = "parallel")]
+    {
+        // Use parallel iterators for large datasets
+        if expected_capacity > 10000 {
+            use rayon::prelude::*;
+
+            let (sum_points, pairs_processed): (Vec<_>, Vec<_>) = state.vertices_a
+                .par_iter()
+                .flat_map(|a| {
+                    state.vertices_b.par_iter().map(move |b| {
+                        (a + b.coords, 1usize)
+                    })
+                })
+                .unzip();
+
+            state.sum_points = sum_points;
+            state.metrics.vertex_pairs_processed = pairs_processed.iter().sum();
+        } else {
+            // Use sequential iterators for smaller datasets
+            let (sum_points, pairs_processed): (Vec<_>, Vec<_>) = state.vertices_a
+                .iter()
+                .flat_map(|a| {
+                    state.vertices_b.iter().map(move |b| {
+                        (a + b.coords, 1usize)
+                    })
+                })
+                .unzip();
+
+            state.sum_points = sum_points;
+            state.metrics.vertex_pairs_processed = pairs_processed.len();
         }
+    }
+
+    #[cfg(not(feature = "parallel"))]
+    {
+        // Sequential iterator-based Cartesian product
+        let (sum_points, pairs_processed): (Vec<_>, Vec<_>) = state.vertices_a
+            .iter()
+            .flat_map(|a| {
+                state.vertices_b.iter().map(move |b| {
+                    (a + b.coords, 1usize)
+                })
+            })
+            .unzip();
+
+        state.sum_points = sum_points;
+        state.metrics.vertex_pairs_processed = pairs_processed.len();
     }
 
     // Validate that we generated points

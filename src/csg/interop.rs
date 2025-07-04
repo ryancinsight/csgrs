@@ -127,32 +127,30 @@ impl<S: Clone + Debug + Send + Sync> CSG<S> {
         let tessellated_csg = &self.tessellate();
         let polygons = &tessellated_csg.polygons;
 
-        // Prepare buffers
-        let mut positions_32 = Vec::new();
-        let mut normals_32 = Vec::new();
-        let mut indices = Vec::with_capacity(polygons.len() * 3);
+        // Filter valid triangular polygons and collect vertex data using iterator combinators
+        let valid_polygons: Vec<_> = polygons
+            .iter()
+            .filter(|poly| poly.vertices.len() == 3)
+            .collect();
 
-        let mut index_start = 0u32;
+        // Extract positions and normals using flat_map for efficient collection
+        let (positions_32, normals_32): (Vec<[f32; 3]>, Vec<[f32; 3]>) = valid_polygons
+            .iter()
+            .flat_map(|poly| &poly.vertices)
+            .map(|v| {
+                let pos = [v.pos.x as f32, v.pos.y as f32, v.pos.z as f32];
+                let normal = [v.normal.x as f32, v.normal.y as f32, v.normal.z as f32];
+                (pos, normal)
+            })
+            .unzip();
 
-        // Each polygon is assumed to have exactly 3 vertices after tessellation.
-        for poly in polygons {
-            // skip any degenerate polygons
-            if poly.vertices.len() != 3 {
-                continue;
-            }
-
-            // push 3 positions/normals
-            for v in &poly.vertices {
-                positions_32.push([v.pos.x as f32, v.pos.y as f32, v.pos.z as f32]);
-                normals_32.push([v.normal.x as f32, v.normal.y as f32, v.normal.z as f32]);
-            }
-
-            // triangle indices
-            indices.push(index_start);
-            indices.push(index_start + 1);
-            indices.push(index_start + 2);
-            index_start += 3;
-        }
+        // Generate triangle indices using iterator combinators
+        let indices: Vec<u32> = (0..valid_polygons.len())
+            .flat_map(|i| {
+                let base = (i * 3) as u32;
+                [base, base + 1, base + 2]
+            })
+            .collect();
 
         // Create the mesh with the new 2-argument constructor
         let mut mesh =

@@ -14,6 +14,7 @@
 pub mod core;
 pub mod construction;
 pub mod queries;
+pub mod advanced_queries;
 
 // Re-export the main types for public API
 pub use core::Node;

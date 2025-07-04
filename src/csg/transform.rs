@@ -1,6 +1,6 @@
 use super::CSG;
 use crate::core::float_types::{EPSILON, Real};
-use crate::geometry::Plane;
+use crate::geometry::{Plane, Polygon};
 use geo::{AffineOps, AffineTransform};
 use nalgebra::{Matrix3, Matrix4, Point3, Rotation3, Translation3, Vector3};
 use std::fmt::Debug;
@@ -62,32 +62,107 @@ impl<S: Clone + Debug + Send + Sync> CSG<S> {
             },
         };
 
-        let mut csg = self.clone();
+        // Transform polygons using advanced iterator patterns with parallel processing
+        #[cfg(feature = "parallel")]
+        let transformed_polygons: Vec<Polygon<S>> = {
+            if self.polygons.len() > 1000 {
+                use rayon::prelude::*;
 
-        for poly in &mut csg.polygons {
-            for vert in &mut poly.vertices {
-                // Transform position using homogeneous coordinates
-                let hom_pos = mat * vert.pos.to_homogeneous();
-                match Point3::from_homogeneous(hom_pos) {
-                    Some(transformed_pos) => vert.pos = transformed_pos,
-                    None => {
-                        eprintln!(
-                            "Warning: Invalid homogeneous coordinates after transformation, skipping vertex"
-                        );
-                        continue;
-                    },
-                }
+                // Use parallel processing for large meshes
+                self.polygons
+                    .par_iter()
+                    .filter_map(|poly| {
+                        // Transform vertices using parallel iterator patterns
+                        let transformed_vertices: Vec<_> = poly
+                            .vertices
+                            .par_iter()
+                            .filter_map(|vert| {
+                                // Transform position using homogeneous coordinates
+                                let hom_pos = mat * vert.pos.to_homogeneous();
+                                Point3::from_homogeneous(hom_pos).map(|transformed_pos| {
+                                    let mut new_vert = vert.clone();
+                                    new_vert.pos = transformed_pos;
+                                    // Transform normal using inverse transpose rule
+                                    new_vert.normal = mat_inv_transpose.transform_vector(&vert.normal).normalize();
+                                    new_vert
+                                })
+                            })
+                            .collect();
 
-                // Transform normal using inverse transpose rule
-                vert.normal = mat_inv_transpose.transform_vector(&vert.normal).normalize();
+                        if transformed_vertices.len() >= 3 {
+                            let mut new_poly = Polygon::new(transformed_vertices, poly.metadata.clone());
+                            new_poly.set_new_normal();
+                            Some(new_poly)
+                        } else {
+                            None
+                        }
+                    })
+                    .collect()
+            } else {
+                // Sequential processing for smaller meshes
+                self.polygons
+                    .iter()
+                    .filter_map(|poly| {
+                        let transformed_vertices: Vec<_> = poly
+                            .vertices
+                            .iter()
+                            .filter_map(|vert| {
+                                let hom_pos = mat * vert.pos.to_homogeneous();
+                                Point3::from_homogeneous(hom_pos).map(|transformed_pos| {
+                                    let mut new_vert = vert.clone();
+                                    new_vert.pos = transformed_pos;
+                                    new_vert.normal = mat_inv_transpose.transform_vector(&vert.normal).normalize();
+                                    new_vert
+                                })
+                            })
+                            .collect();
+
+                        if transformed_vertices.len() >= 3 {
+                            let mut new_poly = Polygon::new(transformed_vertices, poly.metadata.clone());
+                            new_poly.set_new_normal();
+                            Some(new_poly)
+                        } else {
+                            None
+                        }
+                    })
+                    .collect()
             }
+        };
 
-            // Reconstruct plane from transformed vertices for consistency
-            poly.plane = Plane::from_vertices(poly.vertices.clone());
+        #[cfg(not(feature = "parallel"))]
+        let transformed_polygons: Vec<Polygon<S>> = self
+            .polygons
+            .iter()
+            .filter_map(|poly| {
+                // Transform vertices using iterator patterns
+                let transformed_vertices: Vec<_> = poly
+                    .vertices
+                    .iter()
+                    .filter_map(|vert| {
+                        // Transform position using homogeneous coordinates
+                        let hom_pos = mat * vert.pos.to_homogeneous();
+                        Point3::from_homogeneous(hom_pos).map(|transformed_pos| {
+                            let mut new_vert = vert.clone();
+                            new_vert.pos = transformed_pos;
+                            // Transform normal using inverse transpose rule
+                            new_vert.normal = mat_inv_transpose.transform_vector(&vert.normal).normalize();
+                            new_vert
+                        })
+                    })
+                    .collect();
 
-            // Invalidate the cached bounding box since vertex positions have changed
-            poly.invalidate_bounding_box();
-        }
+                if transformed_vertices.len() >= 3 {
+                    let mut new_poly = Polygon::new(transformed_vertices, poly.metadata.clone());
+                    new_poly.set_new_normal();
+                    Some(new_poly)
+                } else {
+                    None
+                }
+            })
+            .collect();
+
+        let mut csg = self.clone();
+        csg.polygons = transformed_polygons;
 
         // Convert the top-left 2×2 submatrix + translation of a 4×4 into a geo::AffineTransform
         // The 4x4 looks like:

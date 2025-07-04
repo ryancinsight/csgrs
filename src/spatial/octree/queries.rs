@@ -33,19 +33,20 @@ impl<S: Clone + Send + Sync + Debug> Node<S> {
             return;
         }
 
-        // Check polygons in this node
-        for polygon in &self.polygons {
-            if self.polygon_intersects_bounds(polygon, query_bounds) {
-                results.push(polygon);
-            }
-        }
+        // Check polygons in this node using iterator patterns
+        results.extend(
+            self.polygons
+                .iter()
+                .filter(|polygon| self.polygon_intersects_bounds(polygon, query_bounds))
+        );
 
-        // Recursively search children
-        for child in &self.children {
-            if let Some(child_node) = child {
+        // Recursively search children using iterator patterns
+        self.children
+            .iter()
+            .filter_map(|child| child.as_ref())
+            .for_each(|child_node| {
                 child_node.volume_query_recursive(query_bounds, results);
-            }
-        }
+            });
     }
 
     /// Parallel recursive volume query implementation
@@ -101,12 +102,13 @@ impl<S: Clone + Send + Sync + Debug> Node<S> {
                 }
             }
         } else {
-            // Use sequential for smaller subtrees
-            for child in &self.children {
-                if let Some(child_node) = child {
+            // Use sequential for smaller subtrees with iterator patterns
+            self.children
+                .iter()
+                .filter_map(|child| child.as_ref())
+                .for_each(|child_node| {
                     child_node.volume_query_recursive(query_bounds, results);
-                }
-            }
+                });
         }
     }
 
@@ -183,10 +185,8 @@ impl<S: Clone + Send + Sync + Debug> Node<S> {
             return;
         }
 
-        // Include polygons from this node
-        for polygon in &self.polygons {
-            results.push(polygon);
-        }
+        // Include polygons from this node using iterator patterns
+        results.extend(self.polygons.iter());
 
         // Process children in parallel for large subtrees
         if self.polygon_count() > 100 {
@@ -232,38 +232,7 @@ impl<S: Clone + Send + Sync + Debug> Node<S> {
         }
     }
 
-    /// Frustum culling query for rendering optimization
-    pub fn frustum_query(&self, frustum_planes: &[crate::geometry::Plane]) -> Vec<&Polygon<S>> {
-        let mut results = Vec::new();
-        self.frustum_query_recursive(frustum_planes, &mut results);
-        results
-    }
 
-    /// Recursive frustum culling implementation
-    fn frustum_query_recursive<'a>(
-        &'a self,
-        frustum_planes: &[crate::geometry::Plane],
-        results: &mut Vec<&'a Polygon<S>>,
-    ) {
-        // Check if this node's bounds are inside the frustum
-        if !self.bounds_in_frustum(&self.bounds, frustum_planes) {
-            return;
-        }
-
-        // Include polygons from this node
-        for polygon in &self.polygons {
-            if self.polygon_in_frustum(polygon, frustum_planes) {
-                results.push(polygon);
-            }
-        }
-
-        // Recursively process children
-        for child in &self.children {
-            if let Some(child_node) = child {
-                child_node.frustum_query_recursive(frustum_planes, results);
-            }
-        }
-    }
 
     /// Collect a representative subset of polygons from this subtree
     fn collect_representative_polygons<'a>(&'a self, results: &mut Vec<&'a Polygon<S>>, max_count: usize) {
@@ -291,7 +260,7 @@ impl<S: Clone + Send + Sync + Debug> Node<S> {
     }
 
     /// Check if a polygon intersects with a bounding box
-    fn polygon_intersects_bounds(&self, polygon: &Polygon<S>, bounds: &Aabb) -> bool {
+    pub fn polygon_intersects_bounds(&self, polygon: &Polygon<S>, bounds: &Aabb) -> bool {
         // Check if any vertex is inside the bounds
         for vertex in &polygon.vertices {
             if bounds.contains_point(&vertex.pos) {
@@ -307,60 +276,5 @@ impl<S: Clone + Send + Sync + Debug> Node<S> {
         false
     }
 
-    /// Check if bounding box is inside frustum
-    fn bounds_in_frustum(&self, bounds: &Aabb, frustum_planes: &[crate::geometry::Plane]) -> bool {
-        // Simplified frustum culling - check if any corner of the bounding box is inside all planes
-        let corners = [
-            bounds.min,
-            Point3::new(bounds.max.x, bounds.min.y, bounds.min.z),
-            Point3::new(bounds.min.x, bounds.max.y, bounds.min.z),
-            Point3::new(bounds.min.x, bounds.min.y, bounds.max.z),
-            Point3::new(bounds.max.x, bounds.max.y, bounds.min.z),
-            Point3::new(bounds.max.x, bounds.min.y, bounds.max.z),
-            Point3::new(bounds.min.x, bounds.max.y, bounds.max.z),
-            bounds.max,
-        ];
 
-        for corner in &corners {
-            let mut inside_all_planes = true;
-            for plane in frustum_planes {
-                // Calculate signed distance: d = n·p - n·p0 where p0 is a point on the plane
-                let normal = plane.normal();
-                let offset = plane.offset();
-                let signed_distance = normal.dot(&corner.coords) - offset;
-                if signed_distance < 0.0 {
-                    inside_all_planes = false;
-                    break;
-                }
-            }
-            if inside_all_planes {
-                return true;
-            }
-        }
-
-        false
-    }
-
-    /// Check if polygon is inside frustum
-    fn polygon_in_frustum(&self, polygon: &Polygon<S>, frustum_planes: &[crate::geometry::Plane]) -> bool {
-        // Check if any vertex is inside all frustum planes
-        for vertex in &polygon.vertices {
-            let mut inside_all_planes = true;
-            for plane in frustum_planes {
-                // Calculate signed distance: d = n·p - n·p0 where p0 is a point on the plane
-                let normal = plane.normal();
-                let offset = plane.offset();
-                let signed_distance = normal.dot(&vertex.pos.coords) - offset;
-                if signed_distance < 0.0 {
-                    inside_all_planes = false;
-                    break;
-                }
-            }
-            if inside_all_planes {
-                return true;
-            }
-        }
-
-        false
-    }
 }

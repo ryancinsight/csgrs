@@ -175,29 +175,44 @@ impl<S: Clone + Debug + Send + Sync> CSG<S> {
             },
         };
 
-        // Convert back to 3D polygons
-        let mut result_3d = Vec::new();
-        for geo_poly in result_2d.iter() {
-            let exterior = geo_poly.exterior();
-            if exterior.coords().count() >= 4 { // At least 3 unique points + closure
-                let mut vertices_3d = Vec::new();
+        // Convert back to 3D polygons using advanced iterator patterns with error handling
+        let result_3d: Vec<Polygon<S>> = result_2d
+            .iter()
+            .filter_map(|geo_poly| {
+                let exterior = geo_poly.exterior();
+                if exterior.coords().count() >= 4 { // At least 3 unique points + closure
+                    // Use try_collect for robust vertex conversion with error handling
+                    let vertices_result: Result<Vec<crate::geometry::Vertex>, &'static str> = exterior
+                        .coords()
+                        .take(exterior.coords().count() - 1) // Skip closure
+                        .map(|coord| {
+                            let pos_3d = origin.coords + coord.x * u + coord.y * v;
+                            // Validate the projected point for numerical stability
+                            if pos_3d.iter().any(|&x| !x.is_finite()) {
+                                Err("Invalid coordinate after projection")
+                            } else {
+                                let vertex = crate::geometry::Vertex::new(
+                                    nalgebra::Point3::from(pos_3d),
+                                    normal,
+                                );
+                                Ok(vertex)
+                            }
+                        })
+                        .collect();
 
-                for coord in exterior.coords().take(exterior.coords().count() - 1) { // Skip closure
-                    let pos_3d = origin.coords + coord.x * u + coord.y * v;
-                    let vertex = crate::geometry::Vertex::new(
-                        nalgebra::Point3::from(pos_3d),
-                        normal,
-                    );
-                    vertices_3d.push(vertex);
+                    match vertices_result {
+                        Ok(vertices_3d) if vertices_3d.len() >= 3 => {
+                            // Use metadata from the first input polygon
+                            let metadata = polys_a.first().and_then(|p| p.metadata.clone());
+                            Some(Polygon::new(vertices_3d, metadata))
+                        },
+                        _ => None, // Skip invalid polygons
+                    }
+                } else {
+                    None
                 }
-
-                if vertices_3d.len() >= 3 {
-                    // Use metadata from the first input polygon
-                    let metadata = polys_a.first().and_then(|p| p.metadata.clone());
-                    result_3d.push(Polygon::new(vertices_3d, metadata));
-                }
-            }
-        }
+            })
+            .collect();
 
         result_3d
     }
@@ -367,14 +382,16 @@ impl<S: Clone + Debug + Send + Sync> CSG<S> {
         let mut final_gc = GeometryCollection::default();
         final_gc.0.push(Geometry::MultiPolygon(oriented));
 
-        // Re-insert lines & points from self only
+        // Re-insert lines & points from self only using advanced iterator patterns
         // (If you need to exclude lines/points that lie inside other, you'd need more checks here.)
-        for g in &self.geometry.0 {
-            match g {
-                Geometry::Polygon(_) | Geometry::MultiPolygon(_) => {}, // skip
-                _ => final_gc.0.push(g.clone()),
-            }
-        }
+        final_gc.0.extend(
+            self.geometry.0
+                .iter()
+                .filter_map(|g| match g {
+                    Geometry::Polygon(_) | Geometry::MultiPolygon(_) => None, // skip
+                    _ => Some(g.clone()),
+                })
+        );
 
         CSG {
             polygons: final_polys,
@@ -437,20 +454,17 @@ impl<S: Clone + Debug + Send + Sync> CSG<S> {
         let mut final_gc = GeometryCollection::default();
         final_gc.0.push(Geometry::MultiPolygon(oriented));
 
-        // For lines and points: keep them only if they intersect in both sets
+        // For lines and points: keep them only if they intersect in both sets using iterator patterns
         // todo: detect intersection of non-polygons
-        for g in &self.geometry.0 {
-            match g {
-                Geometry::Polygon(_) | Geometry::MultiPolygon(_) => {}, // skip
-                _ => final_gc.0.push(g.clone()),
-            }
-        }
-        for g in &other.geometry.0 {
-            match g {
-                Geometry::Polygon(_) | Geometry::MultiPolygon(_) => {}, // skip
-                _ => final_gc.0.push(g.clone()),
-            }
-        }
+        final_gc.0.extend(
+            self.geometry.0
+                .iter()
+                .chain(other.geometry.0.iter())
+                .filter_map(|g| match g {
+                    Geometry::Polygon(_) | Geometry::MultiPolygon(_) => None, // skip
+                    _ => Some(g.clone()),
+                })
+        );
 
         CSG {
             polygons: a.all_polygons(),

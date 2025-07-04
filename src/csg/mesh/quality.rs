@@ -133,17 +133,13 @@ impl<S: Clone + Debug + Send + Sync> CSG<S> {
         let b = vertices[1].pos;
         let c = vertices[2].pos;
 
-        // Edge vectors and lengths
-        let ab = b - a;
-        let bc = c - b;
-        let ca = a - c;
+        // Edge vectors and lengths using iterator patterns
+        let edges = [b - a, c - b, a - c];
+        let edge_lengths: Vec<Real> = edges.iter().map(|edge| edge.norm()).collect();
+        let [len_ab, len_bc, len_ca] = [edge_lengths[0], edge_lengths[1], edge_lengths[2]];
 
-        let len_ab = ab.norm();
-        let len_bc = bc.norm();
-        let len_ca = ca.norm();
-
-        // Handle degenerate cases
-        if len_ab < Real::EPSILON || len_bc < Real::EPSILON || len_ca < Real::EPSILON {
+        // Handle degenerate cases using iterator patterns
+        if edge_lengths.iter().any(|&len| len < Real::EPSILON) {
             return TriangleQuality {
                 aspect_ratio: Real::INFINITY,
                 min_angle: 0.0,
@@ -155,14 +151,14 @@ impl<S: Clone + Debug + Send + Sync> CSG<S> {
         }
 
         // Triangle area using cross product
-        let area = 0.5 * ab.cross(&(-ca)).norm();
+        let area = 0.5 * edges[0].cross(&(-edges[2])).norm();
 
         if area < Real::EPSILON {
             return TriangleQuality {
                 aspect_ratio: Real::INFINITY,
                 min_angle: 0.0,
                 max_angle: 0.0,
-                edge_ratio: len_ab.max(len_bc).max(len_ca) / len_ab.min(len_bc).min(len_ca),
+                edge_ratio: edge_lengths.iter().fold(0.0 as Real, |a, &b| a.max(b)) / edge_lengths.iter().fold(Real::INFINITY, |a, &b| a.min(b)),
                 area: 0.0,
                 quality_score: 0.0,
             };
@@ -179,16 +175,18 @@ impl<S: Clone + Debug + Send + Sync> CSG<S> {
             / (2.0 * len_ab * len_bc))
             .acos();
 
-        let min_angle = angle_a.min(angle_b).min(angle_c);
-        let max_angle = angle_a.max(angle_b).max(angle_c);
+        // Calculate min/max angles using iterator patterns
+        let angles = [angle_a, angle_b, angle_c];
+        let min_angle = angles.iter().fold(Real::INFINITY, |a, &b| a.min(b));
+        let max_angle = angles.iter().fold(0.0 as Real, |a, &b| a.max(b));
 
-        // Edge length ratio
-        let min_edge = len_ab.min(len_bc).min(len_ca);
-        let max_edge = len_ab.max(len_bc).max(len_ca);
+        // Edge length ratio using iterator patterns
+        let min_edge = edge_lengths.iter().fold(Real::INFINITY, |a, &b| a.min(b));
+        let max_edge = edge_lengths.iter().fold(0.0 as Real, |a, &b| a.max(b));
         let edge_ratio = max_edge / min_edge;
 
         // Aspect ratio (circumradius to inradius ratio)
-        let semiperimeter = (len_ab + len_bc + len_ca) / 2.0;
+        let semiperimeter = edge_lengths.iter().sum::<Real>() / 2.0;
         let circumradius = (len_ab * len_bc * len_ca) / (4.0 * area);
         let inradius = area / semiperimeter;
         let aspect_ratio = circumradius / inradius;
@@ -249,15 +247,55 @@ impl<S: Clone + Debug + Send + Sync> CSG<S> {
             .map(|q| q.quality_score)
             .fold(Real::INFINITY, |a, b| a.min(b));
 
-        let high_quality_count = qualities.iter().filter(|q| q.quality_score > 0.7).count();
-        let high_quality_ratio = high_quality_count as Real / qualities.len() as Real;
+        // Use partition() for efficient quality classification
+        let (high_quality_triangles, _low_quality_triangles): (Vec<_>, Vec<_>) = qualities
+            .iter()
+            .partition(|q| q.quality_score > 0.7);
 
+        let high_quality_ratio = high_quality_triangles.len() as Real / qualities.len() as Real;
+
+        // Use filter and count for sliver detection
         let sliver_count = qualities
             .iter()
             .filter(|q| q.min_angle < (10.0_f64.to_radians()))
             .count();
 
-        // Compute edge length statistics
+        // Compute edge length statistics with parallel processing for large meshes
+        #[cfg(feature = "parallel")]
+        let edge_lengths: Vec<Real> = {
+            if self.polygons.len() > 1000 {
+                use rayon::prelude::*;
+                // Use parallel map to collect edge lengths per polygon, then flatten
+                self.polygons
+                    .par_iter()
+                    .map(|poly| {
+                        // Use iterator chain for edge length computation
+                        poly.vertices
+                            .windows(2)
+                            .map(|w| (w[1].pos - w[0].pos).norm())
+                            .chain(std::iter::once(
+                                (poly.vertices[0].pos - poly.vertices.last().unwrap().pos).norm()
+                            ))
+                            .collect::<Vec<_>>()
+                    })
+                    .flatten()
+                    .collect()
+            } else {
+                self.polygons
+                    .iter()
+                    .flat_map(|poly| {
+                        poly.vertices
+                            .windows(2)
+                            .map(|w| (w[1].pos - w[0].pos).norm())
+                            .chain(std::iter::once(
+                                (poly.vertices[0].pos - poly.vertices.last().unwrap().pos).norm(),
+                            ))
+                    })
+                    .collect()
+            }
+        };
+
+        #[cfg(not(feature = "parallel"))]
         let edge_lengths: Vec<Real> = self
             .polygons
             .iter()
@@ -297,4 +335,50 @@ impl<S: Clone + Debug + Send + Sync> CSG<S> {
             edge_length_std: edge_length_variance,
         }
     }
-} 
+
+    /// **Progressive Quality Analysis with scan()**
+    ///
+    /// Uses scan() for stateful quality tracking across mesh regions,
+    /// providing progressive quality degradation analysis.
+    pub fn analyze_progressive_quality(&self) -> Vec<Real> {
+        let qualities = self.analyze_triangle_quality();
+
+        // Use scan() for running quality average computation
+        qualities
+            .iter()
+            .enumerate()
+            .scan(0.0, |running_sum, (i, quality)| {
+                *running_sum += quality.quality_score;
+                let running_avg = *running_sum / (i + 1) as Real;
+                Some(running_avg)
+            })
+            .collect()
+    }
+
+    /// **Quality Distribution Analysis with group_by patterns**
+    ///
+    /// Groups triangles by quality ranges for distribution analysis.
+    pub fn analyze_quality_distribution(&self) -> std::collections::HashMap<String, usize> {
+        let qualities = self.analyze_triangle_quality();
+
+        // Use iterator patterns to group by quality ranges
+        let mut distribution = std::collections::HashMap::new();
+
+        qualities
+            .iter()
+            .map(|q| {
+                match q.quality_score {
+                    score if score >= 0.9 => "Excellent",
+                    score if score >= 0.7 => "Good",
+                    score if score >= 0.5 => "Fair",
+                    score if score >= 0.3 => "Poor",
+                    _ => "Critical",
+                }
+            })
+            .for_each(|category| {
+                *distribution.entry(category.to_string()).or_insert(0) += 1;
+            });
+
+        distribution
+    }
+}

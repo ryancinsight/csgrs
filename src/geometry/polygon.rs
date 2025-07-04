@@ -162,22 +162,26 @@ impl<S: Clone + Send + Sync> Polygon<S> {
             let triangle_indices = triangulation.triangle_indices;
             let vertices = triangulation.vertices;
 
-            // Convert back into 3D triangles
-            let mut triangles = Vec::with_capacity(triangle_indices.len() / 3);
-            for tri_chunk in triangle_indices.chunks_exact(3) {
-                let mut tri_vertices = [const {
-                    Vertex::new(Point3::new(0.0, 0.0, 0.0), Vector3::new(0.0, 0.0, 0.0))
-                }; 3];
-                for (k, &idx) in tri_chunk.iter().enumerate() {
-                    let base = idx * 2;
-                    let x = vertices[base];
-                    let y = vertices[base + 1];
-                    let pos_3d = origin_3d.coords + (x * u) + (y * v);
-                    tri_vertices[k] = Vertex::new(Point3::from(pos_3d), normal_3d);
-                }
-                triangles.push(tri_vertices);
-            }
-            triangles
+            // Convert back into 3D triangles using iterator combinators
+            triangle_indices
+                .chunks_exact(3)
+                .map(|tri_chunk| {
+                    // Convert each triangle's indices to 3D vertices
+                    let tri_vertices: [Vertex; 3] = tri_chunk
+                        .iter()
+                        .map(|&idx| {
+                            let base = idx * 2;
+                            let x = vertices[base];
+                            let y = vertices[base + 1];
+                            let pos_3d = origin_3d.coords + (x * u) + (y * v);
+                            Vertex::new(Point3::from(pos_3d), normal_3d)
+                        })
+                        .collect::<Vec<_>>()
+                        .try_into()
+                        .expect("chunks_exact(3) guarantees exactly 3 elements");
+                    tri_vertices
+                })
+                .collect()
         }
 
         #[cfg(feature = "delaunay")]
@@ -294,23 +298,21 @@ impl<S: Clone + Send + Sync> Polygon<S> {
         // 1) Triangulate the polygon as it is.
         let base_tris = self.tessellate();
 
-        // 2) For each triangle, subdivide 'subdivisions' times.
-        let mut result = Vec::new();
-        for tri in base_tris {
-            // We'll keep a queue of triangles to process
-            let mut queue = vec![tri];
-            for _ in 0..subdivisions.get() {
-                let mut next_level = Vec::new();
-                for t in queue {
-                    let subs = subdivide_triangle(t);
-                    next_level.extend(subs);
-                }
-                queue = next_level;
-            }
-            result.extend(queue);
-        }
-
-        result
+        // 2) For each triangle, subdivide 'subdivisions' times using iterator combinators.
+        base_tris
+            .into_iter()
+            .flat_map(|tri| {
+                // Use fold to iteratively subdivide each triangle
+                (0..subdivisions.get())
+                    .fold(vec![tri], |current_triangles, _| {
+                        // For each subdivision level, flat_map all current triangles
+                        current_triangles
+                            .into_iter()
+                            .flat_map(subdivide_triangle)
+                            .collect()
+                    })
+            })
+            .collect()
     }
 
     /// Convert subdivision triangles back to polygons for CSG operations

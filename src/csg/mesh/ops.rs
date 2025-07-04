@@ -41,71 +41,175 @@ impl<S: Clone + Debug + Send + Sync> CSG<S> {
         let mut smoothed_polygons = self.polygons.clone();
 
         for iteration in 0..iterations {
-            // Build current vertex position mapping
-            let mut current_positions: HashMap<usize, Point3<Real>> = HashMap::new();
-            for polygon in &smoothed_polygons {
-                for vertex in &polygon.vertices {
-                    // Find the global index for this position (with tolerance)
-                    for (pos, idx) in &vertex_map.position_to_index {
-                        if (vertex.pos - pos).norm() < vertex_map.epsilon {
-                            current_positions.insert(*idx, vertex.pos);
-                            break;
-                        }
-                    }
+            // Build current vertex position mapping using advanced iterator patterns
+            #[cfg(feature = "parallel")]
+            let current_positions: HashMap<usize, Point3<Real>> = {
+                if smoothed_polygons.len() > 100 {
+                    use rayon::prelude::*;
+                    smoothed_polygons
+                        .par_iter()
+                        .flat_map(|polygon| polygon.vertices.par_iter())
+                        .filter_map(|vertex| {
+                            vertex_map.position_to_index
+                                .iter()
+                                .find(|(pos, _)| (vertex.pos - *pos).norm() < vertex_map.epsilon)
+                                .map(|(_, idx)| (*idx, vertex.pos))
+                        })
+                        .collect()
+                } else {
+                    smoothed_polygons
+                        .iter()
+                        .flat_map(|polygon| polygon.vertices.iter())
+                        .filter_map(|vertex| {
+                            vertex_map.position_to_index
+                                .iter()
+                                .find(|(pos, _)| (vertex.pos - *pos).norm() < vertex_map.epsilon)
+                                .map(|(_, idx)| (*idx, vertex.pos))
+                        })
+                        .collect()
                 }
-            }
+            };
 
-            // Compute Laplacian for each vertex
-            let mut laplacian_updates: HashMap<usize, Point3<Real>> = HashMap::new();
-            for (&vertex_idx, neighbors) in &adjacency {
-                if let Some(&current_pos) = current_positions.get(&vertex_idx) {
-                    // Check if this is a boundary vertex
-                    if preserve_boundaries && neighbors.len() < 4 {
-                        // Boundary vertex - skip smoothing
-                        laplacian_updates.insert(vertex_idx, current_pos);
-                        continue;
-                    }
+            #[cfg(not(feature = "parallel"))]
+            let current_positions: HashMap<usize, Point3<Real>> = smoothed_polygons
+                .iter()
+                .flat_map(|polygon| polygon.vertices.iter())
+                .filter_map(|vertex| {
+                    vertex_map.position_to_index
+                        .iter()
+                        .find(|(pos, _)| (vertex.pos - *pos).norm() < vertex_map.epsilon)
+                        .map(|(_, idx)| (*idx, vertex.pos))
+                })
+                .collect();
 
-                    // Compute neighbor average
-                    let mut neighbor_sum = Point3::origin();
-                    let mut valid_neighbors = 0;
+            // Compute Laplacian updates using advanced iterator patterns with parallel processing
+            #[cfg(feature = "parallel")]
+            let laplacian_updates: HashMap<usize, Point3<Real>> = {
+                if adjacency.len() > 500 {
+                    use rayon::prelude::*;
+                    adjacency
+                        .par_iter()
+                        .filter_map(|(&vertex_idx, neighbors)| {
+                            current_positions.get(&vertex_idx).map(|&current_pos| {
+                                // Check boundary condition
+                                if preserve_boundaries && neighbors.len() < 4 {
+                                    return (vertex_idx, current_pos);
+                                }
 
-                    for &neighbor_idx in neighbors {
-                        if let Some(&neighbor_pos) = current_positions.get(&neighbor_idx) {
-                            neighbor_sum += neighbor_pos.coords;
-                            valid_neighbors += 1;
-                        }
-                    }
+                                // Use reduce() for efficient neighbor position accumulation
+                                let neighbor_sum = neighbors
+                                    .par_iter()
+                                    .filter_map(|&neighbor_idx| current_positions.get(&neighbor_idx))
+                                    .map(|&pos| pos.coords)
+                                    .reduce(|| nalgebra::Vector3::zeros(), |acc, pos| acc + pos);
 
-                    if valid_neighbors > 0 {
-                        let neighbor_avg = neighbor_sum / valid_neighbors as Real;
-                        let laplacian = neighbor_avg - current_pos;
-                        let new_pos = current_pos + laplacian * lambda;
-                        laplacian_updates.insert(vertex_idx, new_pos);
-                    } else {
-                        laplacian_updates.insert(vertex_idx, current_pos);
-                    }
+                                let valid_neighbors = neighbors
+                                    .iter()
+                                    .filter(|&&neighbor_idx| current_positions.contains_key(&neighbor_idx))
+                                    .count();
+
+                                if valid_neighbors > 0 {
+                                    let neighbor_avg = Point3::from(neighbor_sum / valid_neighbors as Real);
+                                    let laplacian = neighbor_avg - current_pos;
+                                    let new_pos = current_pos + laplacian * lambda;
+                                    (vertex_idx, new_pos)
+                                } else {
+                                    (vertex_idx, current_pos)
+                                }
+                            })
+                        })
+                        .collect()
+                } else {
+                    adjacency
+                        .iter()
+                        .filter_map(|(&vertex_idx, neighbors)| {
+                            current_positions.get(&vertex_idx).map(|&current_pos| {
+                                // Check boundary condition
+                                if preserve_boundaries && neighbors.len() < 4 {
+                                    return (vertex_idx, current_pos);
+                                }
+
+                                // Use fold() for neighbor position accumulation
+                                let neighbor_sum = neighbors
+                                    .iter()
+                                    .filter_map(|&neighbor_idx| current_positions.get(&neighbor_idx))
+                                    .fold(nalgebra::Vector3::zeros(), |acc, &pos| acc + pos.coords);
+
+                                let valid_neighbors = neighbors
+                                    .iter()
+                                    .filter(|&&neighbor_idx| current_positions.contains_key(&neighbor_idx))
+                                    .count();
+
+                                if valid_neighbors > 0 {
+                                    let neighbor_avg = Point3::from(neighbor_sum / valid_neighbors as Real);
+                                    let laplacian = neighbor_avg - current_pos;
+                                    let new_pos = current_pos + laplacian * lambda;
+                                    (vertex_idx, new_pos)
+                                } else {
+                                    (vertex_idx, current_pos)
+                                }
+                            })
+                        })
+                        .collect()
                 }
-            }
+            };
 
-            // Apply updates to mesh vertices
-            for polygon in &mut smoothed_polygons {
-                for vertex in &mut polygon.vertices {
-                    // Find the global index for this vertex
-                    for (pos, idx) in &vertex_map.position_to_index {
-                        if (vertex.pos - pos).norm() < vertex_map.epsilon {
-                            if let Some(&new_pos) = laplacian_updates.get(idx) {
-                                vertex.pos = new_pos;
+            #[cfg(not(feature = "parallel"))]
+            let laplacian_updates: HashMap<usize, Point3<Real>> = adjacency
+                .iter()
+                .filter_map(|(&vertex_idx, neighbors)| {
+                    current_positions.get(&vertex_idx).map(|&current_pos| {
+                        // Check boundary condition
+                        if preserve_boundaries && neighbors.len() < 4 {
+                            return (vertex_idx, current_pos);
+                        }
+
+                        // Use fold() for neighbor position accumulation
+                        let neighbor_sum = neighbors
+                            .iter()
+                            .filter_map(|&neighbor_idx| current_positions.get(&neighbor_idx))
+                            .fold(nalgebra::Vector3::zeros(), |acc, &pos| acc + pos.coords);
+
+                        let valid_neighbors = neighbors
+                            .iter()
+                            .filter(|&&neighbor_idx| current_positions.contains_key(&neighbor_idx))
+                            .count();
+
+                        if valid_neighbors > 0 {
+                            let neighbor_avg = Point3::from(neighbor_sum / valid_neighbors as Real);
+                            let laplacian = neighbor_avg - current_pos;
+                            let new_pos = current_pos + laplacian * lambda;
+                            (vertex_idx, new_pos)
+                        } else {
+                            (vertex_idx, current_pos)
+                        }
+                    })
+                })
+                .collect();
+
+            // Apply updates using iterator patterns with early termination
+            smoothed_polygons
+                .iter_mut()
+                .for_each(|polygon| {
+                    polygon.vertices
+                        .iter_mut()
+                        .for_each(|vertex| {
+                            // Use find() for early termination when matching vertex
+                            if let Some((_, idx)) = vertex_map.position_to_index
+                                .iter()
+                                .find(|(pos, _)| (vertex.pos - *pos).norm() < vertex_map.epsilon)
+                            {
+                                if let Some(&new_pos) = laplacian_updates.get(idx) {
+                                    vertex.pos = new_pos;
+                                }
                             }
-                            break;
-                        }
-                    }
-                }
-                // Recompute polygon plane and normals after smoothing
-                polygon.set_new_normal();
-                // Invalidate the cached bounding box since vertex positions have changed
-                polygon.invalidate_bounding_box();
-            }
+                        });
+
+                    // Recompute polygon plane and normals after smoothing
+                    polygon.set_new_normal();
+                    // Invalidate the cached bounding box since vertex positions have changed
+                    polygon.invalidate_bounding_box();
+                });
 
             // Progress feedback for long smoothing operations
             if iterations > 10 && iteration % (iterations / 10) == 0 {
@@ -168,14 +272,17 @@ impl<S: Clone + Debug + Send + Sync> CSG<S> {
                         continue;
                     }
 
-                    let mut neighbor_sum = Point3::origin();
-                    let mut valid_neighbors = 0;
-                    for &neighbor_idx in neighbors {
-                        if let Some(&neighbor_pos) = current_positions.get(&neighbor_idx) {
-                            neighbor_sum += neighbor_pos.coords;
-                            valid_neighbors += 1;
-                        }
-                    }
+                    // Compute neighbor average using iterator combinators
+                    let neighbor_positions: Vec<Point3<Real>> = neighbors
+                        .iter()
+                        .filter_map(|&neighbor_idx| current_positions.get(&neighbor_idx))
+                        .copied()
+                        .collect();
+
+                    let valid_neighbors = neighbor_positions.len();
+                    let neighbor_sum = neighbor_positions
+                        .iter()
+                        .fold(Point3::origin(), |acc, &pos| acc + pos.coords);
 
                     if valid_neighbors > 0 {
                         let neighbor_avg = neighbor_sum / valid_neighbors as Real;
@@ -219,14 +326,17 @@ impl<S: Clone + Debug + Send + Sync> CSG<S> {
                         continue;
                     }
 
-                    let mut neighbor_sum = Point3::origin();
-                    let mut valid_neighbors = 0;
-                    for &neighbor_idx in neighbors {
-                        if let Some(&neighbor_pos) = current_positions.get(&neighbor_idx) {
-                            neighbor_sum += neighbor_pos.coords;
-                            valid_neighbors += 1;
-                        }
-                    }
+                    // Compute neighbor average using iterator combinators
+                    let neighbor_positions: Vec<Point3<Real>> = neighbors
+                        .iter()
+                        .filter_map(|&neighbor_idx| current_positions.get(&neighbor_idx))
+                        .copied()
+                        .collect();
+
+                    let valid_neighbors = neighbor_positions.len();
+                    let neighbor_sum = neighbor_positions
+                        .iter()
+                        .fold(Point3::origin(), |acc, &pos| acc + pos.coords);
 
                     if valid_neighbors > 0 {
                         let neighbor_avg = neighbor_sum / valid_neighbors as Real;
@@ -287,12 +397,17 @@ impl<S: Clone + Debug + Send + Sync> CSG<S> {
         let mut refined_polygons = Vec::new();
         let mut polygon_map: HashMap<usize, Vec<usize>> = HashMap::new();
 
-        for (poly_idx, poly) in self.polygons.iter().enumerate() {
-            for vertex in &poly.vertices {
+        // Build polygon-vertex mapping using advanced iterator patterns
+        self.polygons
+            .iter()
+            .enumerate()
+            .flat_map(|(poly_idx, poly)| {
+                poly.vertices.iter().map(move |vertex| (poly_idx, vertex))
+            })
+            .for_each(|(poly_idx, vertex)| {
                 let v_idx = vertex_map.get_or_create_index(vertex.pos);
                 polygon_map.entry(v_idx).or_default().push(poly_idx);
-            }
-        }
+            });
 
         for (i, polygon) in self.polygons.iter().enumerate() {
             let mut should_refine = false;
@@ -307,32 +422,38 @@ impl<S: Clone + Debug + Send + Sync> CSG<S> {
                 }
             }
 
-            // Curvature check
+            // Curvature check using iterator patterns
             if !should_refine {
-                'edge_loop: for edge in polygon.edges() {
-                    let v1_idx = vertex_map.get_or_create_index(edge.0.pos);
-                    let v2_idx = vertex_map.get_or_create_index(edge.1.pos);
+                should_refine = polygon.edges()
+                    .any(|edge| {
+                        let v1_idx = vertex_map.get_or_create_index(edge.0.pos);
+                        let v2_idx = vertex_map.get_or_create_index(edge.1.pos);
 
-                    if let (Some(p1_indices), Some(p2_indices)) =
-                        (polygon_map.get(&v1_idx), polygon_map.get(&v2_idx))
-                    {
-                        for &p1_idx in p1_indices {
-                            if p1_idx == i {
-                                continue;
-                            }
-                            for &p2_idx in p2_indices {
-                                if p1_idx == p2_idx {
+                        if let (Some(p1_indices), Some(p2_indices)) =
+                            (polygon_map.get(&v1_idx), polygon_map.get(&v2_idx))
+                        {
+                            // Use iterator patterns for nested polygon index checking
+                            p1_indices
+                                .iter()
+                                .filter(|&&p1_idx| p1_idx != i)
+                                .flat_map(|&p1_idx| {
+                                    p2_indices.iter().filter_map(move |&p2_idx| {
+                                        if p1_idx == p2_idx {
+                                            Some(p1_idx)
+                                        } else {
+                                            None
+                                        }
+                                    })
+                                })
+                                .any(|p1_idx| {
                                     let other_poly = &self.polygons[p1_idx];
                                     let angle = Self::dihedral_angle(polygon, other_poly);
-                                    if angle > curvature_threshold_deg.to_radians() {
-                                        should_refine = true;
-                                        break 'edge_loop;
-                                    }
-                                }
-                            }
+                                    angle > curvature_threshold_deg.to_radians()
+                                })
+                        } else {
+                            false
                         }
-                    }
-                }
+                    });
             }
 
             if should_refine {
@@ -522,8 +643,39 @@ impl<S: Clone + Debug + Send + Sync> CSG<S> {
     }
 
     /// Triangulate each polygon in the CSG returning a CSG containing triangles
+    /// with intelligent parallel processing for large meshes
     pub fn tessellate(&self) -> CSG<S> {
-        let triangles = self
+        #[cfg(feature = "parallel")]
+        let triangles: Vec<Polygon<S>> = {
+            if self.polygons.len() > 1000 {
+                use rayon::prelude::*;
+
+                // Use parallel processing for large meshes
+                self.polygons
+                    .par_iter()
+                    .flat_map(|poly| {
+                        poly.tessellate()
+                            .into_par_iter()
+                            .map(move |triangle| {
+                                Polygon::new(triangle.to_vec(), poly.metadata.clone())
+                            })
+                    })
+                    .collect()
+            } else {
+                // Sequential processing for smaller meshes
+                self.polygons
+                    .iter()
+                    .flat_map(|poly| {
+                        poly.tessellate().into_iter().map(move |triangle| {
+                            Polygon::new(triangle.to_vec(), poly.metadata.clone())
+                        })
+                    })
+                    .collect()
+            }
+        };
+
+        #[cfg(not(feature = "parallel"))]
+        let triangles: Vec<Polygon<S>> = self
             .polygons
             .iter()
             .flat_map(|poly| {
@@ -531,7 +683,7 @@ impl<S: Clone + Debug + Send + Sync> CSG<S> {
                     Polygon::new(triangle.to_vec(), poly.metadata.clone())
                 })
             })
-            .collect::<Vec<_>>();
+            .collect();
 
         CSG::from_polygons(&triangles)
     }

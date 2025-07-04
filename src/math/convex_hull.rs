@@ -41,17 +41,122 @@ impl<S: Clone + Debug + Send + Sync> CSG<S> {
 
         let (verts, indices) = hull.vertices_indices();
 
-        // Reconstruct polygons as triangles
-        let mut polygons = Vec::new();
-        for tri in indices.chunks(3) {
-            let v0 = &verts[tri[0]];
-            let v1 = &verts[tri[1]];
-            let v2 = &verts[tri[2]];
-            let vv0 = Vertex::new(Point3::new(v0[0], v0[1], v0[2]), Vector3::zeros());
-            let vv1 = Vertex::new(Point3::new(v1[0], v1[1], v1[2]), Vector3::zeros());
-            let vv2 = Vertex::new(Point3::new(v2[0], v2[1], v2[2]), Vector3::zeros());
-            polygons.push(Polygon::new(vec![vv0, vv1, vv2], None));
-        }
+        // Reconstruct polygons as triangles using advanced iterator patterns
+        #[cfg(feature = "parallel")]
+        let polygons: Vec<Polygon<S>> = {
+            if indices.len() > 3000 { // More than 1000 triangles
+                use rayon::prelude::*;
+
+                // Use parallel processing for large hull datasets
+                indices
+                    .par_chunks(3)
+                    .filter_map(|tri| {
+                        if tri.len() == 3 {
+                            // Use iterator patterns for robust vertex creation
+                            let vertices_result: Result<Vec<Vertex>, &'static str> = tri
+                                .iter()
+                                .map(|&idx| {
+                                    if idx < verts.len() {
+                                        let v = &verts[idx];
+                                        if v.len() >= 3 && v.iter().all(|&coord| coord.is_finite()) {
+                                            Ok(Vertex::new(
+                                                Point3::new(v[0], v[1], v[2]),
+                                                Vector3::zeros()
+                                            ))
+                                        } else {
+                                            Err("Invalid vertex coordinates")
+                                        }
+                                    } else {
+                                        Err("Vertex index out of bounds")
+                                    }
+                                })
+                                .collect();
+
+                            match vertices_result {
+                                Ok(vertices) if vertices.len() == 3 => {
+                                    Some(Polygon::new(vertices, None))
+                                },
+                                _ => None,
+                            }
+                        } else {
+                            None
+                        }
+                    })
+                    .collect()
+            } else {
+                // Sequential processing for smaller datasets
+                indices
+                    .chunks(3)
+                    .filter_map(|tri| {
+                        if tri.len() == 3 {
+                            let vertices_result: Result<Vec<Vertex>, &'static str> = tri
+                                .iter()
+                                .map(|&idx| {
+                                    if idx < verts.len() {
+                                        let v = &verts[idx];
+                                        if v.len() >= 3 && v.iter().all(|&coord| coord.is_finite()) {
+                                            Ok(Vertex::new(
+                                                Point3::new(v[0], v[1], v[2]),
+                                                Vector3::zeros()
+                                            ))
+                                        } else {
+                                            Err("Invalid vertex coordinates")
+                                        }
+                                    } else {
+                                        Err("Vertex index out of bounds")
+                                    }
+                                })
+                                .collect();
+
+                            match vertices_result {
+                                Ok(vertices) if vertices.len() == 3 => {
+                                    Some(Polygon::new(vertices, None))
+                                },
+                                _ => None,
+                            }
+                        } else {
+                            None
+                        }
+                    })
+                    .collect()
+            }
+        };
+
+        #[cfg(not(feature = "parallel"))]
+        let polygons: Vec<Polygon<S>> = indices
+            .chunks(3)
+            .filter_map(|tri| {
+                if tri.len() == 3 {
+                    let vertices_result: Result<Vec<Vertex>, &'static str> = tri
+                        .iter()
+                        .map(|&idx| {
+                            if idx < verts.len() {
+                                let v = &verts[idx];
+                                if v.len() >= 3 && v.iter().all(|&coord| coord.is_finite()) {
+                                    Ok(Vertex::new(
+                                        Point3::new(v[0], v[1], v[2]),
+                                        Vector3::zeros()
+                                    ))
+                                } else {
+                                    Err("Invalid vertex coordinates")
+                                }
+                            } else {
+                                Err("Vertex index out of bounds")
+                            }
+                        })
+                        .collect();
+
+                    match vertices_result {
+                        Ok(vertices) if vertices.len() == 3 => {
+                            Some(Polygon::new(vertices, None))
+                        },
+                        _ => None,
+                    }
+                } else {
+                    None
+                }
+            })
+            .collect();
 
         CSG::from_polygons(&polygons)
     }

@@ -119,35 +119,102 @@ impl<S: Clone + Debug + Send + Sync> CSG<S> {
         stacks: usize,
         metadata: Option<S>,
     ) -> CSG<S> {
-        let mut polygons = Vec::new();
+        // Vertex generation function using mathematical sphere parameterization
+        let vertex = |theta: Real, phi: Real| {
+            let dir = Vector3::new(
+                theta.cos() * phi.sin(),
+                phi.cos(),
+                theta.sin() * phi.sin(),
+            );
+            Vertex::new(
+                Point3::new(dir.x * radius, dir.y * radius, dir.z * radius),
+                dir,
+            )
+        };
 
-        for i in 0..segments {
-            for j in 0..stacks {
-                let mut vertices = Vec::new();
+        // Use advanced iterator patterns for sphere tessellation
+        #[cfg(feature = "parallel")]
+        let polygons: Vec<Polygon<S>> = {
+            if segments * stacks > 10000 { // High-resolution spheres
+                use rayon::prelude::*;
 
-                let vertex = |theta: Real, phi: Real| {
-                    let dir = Vector3::new(
-                        theta.cos() * phi.sin(),
-                        phi.cos(),
-                        theta.sin() * phi.sin(),
-                    );
-                    Vertex::new(
-                        Point3::new(dir.x * radius, dir.y * radius, dir.z * radius),
-                        dir,
-                    )
-                };
+                // Parallel processing for high-resolution spheres
+                (0..segments)
+                    .into_par_iter()
+                    .flat_map(|i| {
+                        (0..stacks)
+                            .into_par_iter()
+                            .map(move |j| (i, j))
+                    })
+                    .map(|(i, j)| {
+                        // Use enumerate-like pattern for coordinate generation
+                        let (t0, t1) = (i as Real / segments as Real, (i + 1) as Real / segments as Real);
+                        let (p0, p1) = (j as Real / stacks as Real, (j + 1) as Real / stacks as Real);
 
-                let t0 = i as Real / segments as Real;
-                let t1 = (i + 1) as Real / segments as Real;
-                let p0 = j as Real / stacks as Real;
-                let p1 = (j + 1) as Real / stacks as Real;
+                        let (theta0, theta1) = (t0 * TAU, t1 * TAU);
+                        let (phi0, phi1) = (p0 * PI, p1 * PI);
 
-                let theta0 = t0 * TAU;
-                let theta1 = t1 * TAU;
-                let phi0 = p0 * PI;
-                let phi1 = p1 * PI;
+                        // Generate vertices using iterator patterns
+                        let mut vertices = vec![vertex(theta0, phi0)];
 
-                vertices.push(vertex(theta0, phi0));
+                        // Conditional vertex addition using iterator patterns
+                        if j > 0 {
+                            vertices.push(vertex(theta1, phi0));
+                        }
+                        if j < stacks - 1 {
+                            vertices.push(vertex(theta1, phi1));
+                        }
+                        vertices.push(vertex(theta0, phi1));
+
+                        Polygon::new(vertices, metadata.clone())
+                    })
+                    .collect()
+            } else {
+                // Sequential processing for smaller spheres
+                (0..segments)
+                    .flat_map(|i| {
+                        (0..stacks).map(move |j| (i, j))
+                    })
+                    .map(|(i, j)| {
+                        let (t0, t1) = (i as Real / segments as Real, (i + 1) as Real / segments as Real);
+                        let (p0, p1) = (j as Real / stacks as Real, (j + 1) as Real / stacks as Real);
+
+                        let (theta0, theta1) = (t0 * TAU, t1 * TAU);
+                        let (phi0, phi1) = (p0 * PI, p1 * PI);
+
+                        let mut vertices = vec![vertex(theta0, phi0)];
+
+                        if j > 0 {
+                            vertices.push(vertex(theta1, phi0));
+                        }
+                        if j < stacks - 1 {
+                            vertices.push(vertex(theta1, phi1));
+                        }
+                        vertices.push(vertex(theta0, phi1));
+
+                        Polygon::new(vertices, metadata.clone())
+                    })
+                    .collect()
+            }
+        };
+
+        #[cfg(not(feature = "parallel"))]
+        let polygons: Vec<Polygon<S>> = (0..segments)
+            .flat_map(|i| {
+                (0..stacks).map(move |j| (i, j))
+            })
+            .map(|(i, j)| {
+                // Use enumerate-like pattern for coordinate generation
+                let (t0, t1) = (i as Real / segments as Real, (i + 1) as Real / segments as Real);
+                let (p0, p1) = (j as Real / stacks as Real, (j + 1) as Real / stacks as Real);
+
+                let (theta0, theta1) = (t0 * TAU, t1 * TAU);
+                let (phi0, phi1) = (p0 * PI, p1 * PI);
+
+                // Generate vertices using functional patterns
+                let mut vertices = vec![vertex(theta0, phi0)];
+
+                // Conditional vertex addition
                 if j > 0 {
                     vertices.push(vertex(theta1, phi0));
                 }
@@ -156,9 +223,10 @@ impl<S: Clone + Debug + Send + Sync> CSG<S> {
                 }
                 vertices.push(vertex(theta0, phi1));
 
-                polygons.push(Polygon::new(vertices, metadata.clone()));
-            }
-        }
+                Polygon::new(vertices, metadata.clone())
+            })
+            .collect();
+
         CSG::from_polygons(&polygons)
     }
 }

@@ -188,23 +188,74 @@ impl<S: Clone + Send + Sync + Debug> Node<S> {
         let mut front_polys = Vec::with_capacity(polygons.len());
         let mut back_polys = Vec::with_capacity(polygons.len());
 
-        // Optimized polygon splitting with iterator patterns
-        for polygon in polygons {
-            let (coplanar_front, coplanar_back, mut front_parts, mut back_parts) =
-                plane.split_polygon(polygon);
+        // Optimized polygon splitting with parallel iterator patterns for large datasets
+        #[cfg(feature = "parallel")]
+        let (all_front_parts, all_back_parts): (Vec<Vec<Polygon<S>>>, Vec<Vec<Polygon<S>>>) = {
+            if polygons.len() > 100 {
+                use rayon::prelude::*;
+                polygons
+                    .par_iter()
+                    .map(|polygon| {
+                        let (coplanar_front, coplanar_back, mut front_parts, mut back_parts) =
+                            plane.split_polygon(polygon);
 
-            // Efficient coplanar polygon classification using iterator chain
-            for coplanar_poly in coplanar_front.into_iter().chain(coplanar_back.into_iter()) {
-                if plane.orient_plane(&coplanar_poly.plane) == FRONT {
-                    front_parts.push(coplanar_poly);
-                } else {
-                    back_parts.push(coplanar_poly);
-                }
+                        // Efficient coplanar polygon classification using iterator chain
+                        let (coplanar_front_parts, coplanar_back_parts): (Vec<_>, Vec<_>) = coplanar_front
+                            .into_iter()
+                            .chain(coplanar_back.into_iter())
+                            .partition(|coplanar_poly| plane.orient_plane(&coplanar_poly.plane) == FRONT);
+
+                        front_parts.extend(coplanar_front_parts);
+                        back_parts.extend(coplanar_back_parts);
+
+                        (front_parts, back_parts)
+                    })
+                    .unzip()
+            } else {
+                polygons
+                    .iter()
+                    .map(|polygon| {
+                        let (coplanar_front, coplanar_back, mut front_parts, mut back_parts) =
+                            plane.split_polygon(polygon);
+
+                        // Efficient coplanar polygon classification using iterator chain
+                        let (coplanar_front_parts, coplanar_back_parts): (Vec<_>, Vec<_>) = coplanar_front
+                            .into_iter()
+                            .chain(coplanar_back.into_iter())
+                            .partition(|coplanar_poly| plane.orient_plane(&coplanar_poly.plane) == FRONT);
+
+                        front_parts.extend(coplanar_front_parts);
+                        back_parts.extend(coplanar_back_parts);
+
+                        (front_parts, back_parts)
+                    })
+                    .unzip()
             }
+        };
 
-            front_polys.append(&mut front_parts);
-            back_polys.append(&mut back_parts);
-        }
+        #[cfg(not(feature = "parallel"))]
+        let (all_front_parts, all_back_parts): (Vec<Vec<Polygon<S>>>, Vec<Vec<Polygon<S>>>) = polygons
+            .iter()
+            .map(|polygon| {
+                let (coplanar_front, coplanar_back, mut front_parts, mut back_parts) =
+                    plane.split_polygon(polygon);
+
+                // Efficient coplanar polygon classification using iterator chain
+                let (coplanar_front_parts, coplanar_back_parts): (Vec<_>, Vec<_>) = coplanar_front
+                    .into_iter()
+                    .chain(coplanar_back.into_iter())
+                    .partition(|coplanar_poly| plane.orient_plane(&coplanar_poly.plane) == FRONT);
+
+                front_parts.extend(coplanar_front_parts);
+                back_parts.extend(coplanar_back_parts);
+
+                (front_parts, back_parts)
+            })
+            .unzip();
+
+        // Flatten the collected parts
+        front_polys.extend(all_front_parts.into_iter().flatten());
+        back_polys.extend(all_back_parts.into_iter().flatten());
 
         // Recursively clip with optimized pattern
         let mut result = if let Some(front_node) = &self.front {
@@ -382,36 +433,233 @@ impl<S: Clone + Send + Sync + Debug> Node<S> {
 
     /// Pick best splitting plane using configuration factors
     fn pick_best_splitting_plane_with_config(&self, polygons: &[Polygon<S>], config: &BspConfig) -> Plane {
-        let mut best_plane = polygons[0].plane.clone();
-        let mut best_score = Real::INFINITY;
+        // Use advanced iterator patterns with parallel processing for plane evaluation
+        #[cfg(feature = "parallel")]
+        let best_plane = {
+            if polygons.len() > 50 {
+                use rayon::prelude::*;
+                polygons
+                    .par_iter()
+                    .map(|polygon| {
+                        let plane = &polygon.plane;
 
-        for polygon in polygons {
-            let plane = &polygon.plane;
-            let mut front_count = 0;
-            let mut back_count = 0;
-            let mut spanning_count = 0;
+                        // Use fold() to accumulate classification counts
+                        let (front_count, back_count, spanning_count) = polygons
+                            .par_iter()
+                            .map(|test_polygon| plane.classify_polygon(test_polygon))
+                            .fold(
+                                || (0u32, 0u32, 0u32),
+                                |(front, back, spanning), classification| match classification {
+                                    FRONT => (front + 1, back, spanning),
+                                    BACK => (front, back + 1, spanning),
+                                    SPANNING => (front, back, spanning + 1),
+                                    _ => (front, back, spanning),
+                                }
+                            )
+                            .reduce(
+                                || (0u32, 0u32, 0u32),
+                                |(f1, b1, s1), (f2, b2, s2)| (f1 + f2, b1 + b2, s1 + s2)
+                            );
 
-            for test_polygon in polygons {
-                match plane.classify_polygon(test_polygon) {
-                    FRONT => front_count += 1,
-                    BACK => back_count += 1,
-                    SPANNING => spanning_count += 1,
-                    COPLANAR => {},
-                    _ => {} // Handle any other values
-                }
+                        // Calculate score using configuration factors
+                        let balance = (front_count as Real - back_count as Real).abs();
+                        let spanning = spanning_count as Real;
+                        let score = config.balance_factor * balance + config.spanning_factor * spanning;
+
+                        (score, plane.clone())
+                    })
+                    .min_by(|(score1, _), (score2, _)| {
+                        score1.partial_cmp(score2).unwrap_or(std::cmp::Ordering::Equal)
+                    })
+                    .map(|(_, plane)| plane)
+                    .unwrap_or_else(|| polygons[0].plane.clone())
+            } else {
+                polygons
+                    .iter()
+                    .map(|polygon| {
+                        let plane = &polygon.plane;
+
+                        // Use fold() to accumulate classification counts
+                        let (front_count, back_count, spanning_count) = polygons
+                            .iter()
+                            .map(|test_polygon| plane.classify_polygon(test_polygon))
+                            .fold((0u32, 0u32, 0u32), |(front, back, spanning), classification| {
+                                match classification {
+                                    FRONT => (front + 1, back, spanning),
+                                    BACK => (front, back + 1, spanning),
+                                    SPANNING => (front, back, spanning + 1),
+                                    _ => (front, back, spanning),
+                                }
+                            });
+
+                        // Calculate score using configuration factors
+                        let balance = (front_count as Real - back_count as Real).abs();
+                        let spanning = spanning_count as Real;
+                        let score = config.balance_factor * balance + config.spanning_factor * spanning;
+
+                        (score, plane.clone())
+                    })
+                    .min_by(|(score1, _), (score2, _)| {
+                        score1.partial_cmp(score2).unwrap_or(std::cmp::Ordering::Equal)
+                    })
+                    .map(|(_, plane)| plane)
+                    .unwrap_or_else(|| polygons[0].plane.clone())
             }
+        };
 
-            // Calculate score using configuration factors
-            let balance = (front_count as Real - back_count as Real).abs();
-            let spanning = spanning_count as Real;
-            let score = config.balance_factor * balance + config.spanning_factor * spanning;
+        #[cfg(not(feature = "parallel"))]
+        let best_plane = polygons
+            .iter()
+            .map(|polygon| {
+                let plane = &polygon.plane;
 
-            if score < best_score {
-                best_score = score;
-                best_plane = plane.clone();
+                // Use fold() to accumulate classification counts
+                let (front_count, back_count, spanning_count) = polygons
+                    .iter()
+                    .map(|test_polygon| plane.classify_polygon(test_polygon))
+                    .fold((0u32, 0u32, 0u32), |(front, back, spanning), classification| {
+                        match classification {
+                            FRONT => (front + 1, back, spanning),
+                            BACK => (front, back + 1, spanning),
+                            SPANNING => (front, back, spanning + 1),
+                            _ => (front, back, spanning),
+                        }
+                    });
+
+                // Calculate score using configuration factors
+                let balance = (front_count as Real - back_count as Real).abs();
+                let spanning = spanning_count as Real;
+                let score = config.balance_factor * balance + config.spanning_factor * spanning;
+
+                (score, plane.clone())
+            })
+            .min_by(|(score1, _), (score2, _)| {
+                score1.partial_cmp(score2).unwrap_or(std::cmp::Ordering::Equal)
+            })
+            .map(|(_, plane)| plane)
+            .unwrap_or_else(|| polygons[0].plane.clone());
+
+        best_plane
+    }
+
+    /// **Advanced BSP spatial query with early termination**
+    ///
+    /// Performs spatial queries on BSP tree using advanced iterator patterns
+    /// with early termination for optimal performance.
+    pub fn spatial_query_with_early_termination<F>(&self, predicate: F) -> Option<&Polygon<S>>
+    where
+        F: Fn(&Polygon<S>) -> bool + Copy,
+    {
+        // Use find() for immediate early termination
+        self.polygons
+            .iter()
+            .find(|polygon| predicate(polygon))
+            .or_else(|| {
+                // Search front child first, then back child with early termination
+                self.front
+                    .as_ref()
+                    .and_then(|child| child.spatial_query_with_early_termination(predicate))
+                    .or_else(|| {
+                        self.back
+                            .as_ref()
+                            .and_then(|child| child.spatial_query_with_early_termination(predicate))
+                    })
+            })
+    }
+
+    /// **Conditional BSP traversal with skip_while() and take_while()**
+    ///
+    /// Traverses BSP tree with conditional processing based on spatial criteria.
+    pub fn conditional_traversal<F, G>(
+        &self,
+        skip_condition: F,
+        take_condition: G,
+        max_results: usize,
+    ) -> Vec<&Polygon<S>>
+    where
+        F: Fn(&Polygon<S>) -> bool + Copy,
+        G: Fn(&Polygon<S>) -> bool + Copy,
+    {
+        let mut results = Vec::new();
+        self.conditional_traversal_recursive(skip_condition, take_condition, max_results, &mut results);
+        results
+    }
+
+    /// **Recursive implementation of conditional BSP traversal**
+    fn conditional_traversal_recursive<'a, F, G>(
+        &'a self,
+        skip_condition: F,
+        take_condition: G,
+        max_results: usize,
+        results: &mut Vec<&'a Polygon<S>>,
+    )
+    where
+        F: Fn(&Polygon<S>) -> bool + Copy,
+        G: Fn(&Polygon<S>) -> bool + Copy,
+    {
+        // Early termination if we have enough results
+        if results.len() >= max_results {
+            return;
+        }
+
+        // Process polygons in this node with advanced iterator patterns
+        let filtered_polygons: Vec<&Polygon<S>> = self.polygons
+            .iter()
+            .skip_while(|polygon| skip_condition(polygon))
+            .take_while(|polygon| take_condition(polygon) && results.len() < max_results)
+            .collect();
+
+        results.extend(filtered_polygons);
+
+        // Recursively traverse children with early termination
+        if results.len() < max_results {
+            if let Some(ref front_child) = self.front {
+                front_child.conditional_traversal_recursive(
+                    skip_condition,
+                    take_condition,
+                    max_results,
+                    results,
+                );
             }
         }
 
-        best_plane
+        if results.len() < max_results {
+            if let Some(ref back_child) = self.back {
+                back_child.conditional_traversal_recursive(
+                    skip_condition,
+                    take_condition,
+                    max_results,
+                    results,
+                );
+            }
+        }
+    }
+
+    /// **Parallel BSP spatial filtering with intelligent thresholds**
+    ///
+    /// Performs parallel spatial filtering for large BSP trees with
+    /// automatic threshold-based optimization.
+    #[cfg(feature = "parallel")]
+    pub fn parallel_bsp_filter<F>(&self, predicate: F) -> usize
+    where
+        F: Fn(&Polygon<S>) -> bool + Send + Sync + Copy,
+    {
+        let all_polygons = self.all_polygons();
+
+        if all_polygons.len() > 500 {
+            use rayon::prelude::*;
+
+            // Use parallel iterator for large datasets - return count instead of references
+            all_polygons
+                .par_iter()
+                .filter(|polygon| predicate(polygon))
+                .count()
+        } else {
+            // Use sequential iterator for smaller datasets
+            all_polygons
+                .iter()
+                .filter(|polygon| predicate(polygon))
+                .count()
+        }
     }
 }

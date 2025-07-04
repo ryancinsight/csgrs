@@ -54,12 +54,12 @@ impl<S: Clone> Node<S> {
             }
             
             if node.is_leaf {
-                // Test ray against all polygons in leaf
-                for polygon in &node.polygons {
-                    if let Some(intersection) = self.ray_polygon_intersection(ray, polygon) {
-                        intersections.push(intersection);
-                    }
-                }
+                // Test ray against all polygons in leaf using iterator patterns
+                intersections.extend(
+                    node.polygons
+                        .iter()
+                        .filter_map(|polygon| self.ray_polygon_intersection(ray, polygon))
+                );
             } else if let Some((ref left, ref right)) = node.children {
                 // Add children to stack for traversal
                 // Order children by ray direction for better cache performance

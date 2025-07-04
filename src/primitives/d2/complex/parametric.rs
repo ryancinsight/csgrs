@@ -117,16 +117,22 @@ impl<S: Clone + Debug + Send + Sync> CSG<S> {
         let end_rad = end_angle_deg.to_radians();
         let sweep = end_rad - start_rad;
 
-        // Build a ring of coordinates starting at (0,0), going around the arc, and closing at (0,0).
+        // Build a ring of coordinates using iterator patterns for arc generation
         let mut coords = Vec::with_capacity(segments + 2);
         coords.push((0.0, 0.0));
-        for i in 0..=segments {
-            let t = i as Real / (segments as Real);
-            let angle = start_rad + t * sweep;
-            let x = radius * angle.cos();
-            let y = radius * angle.sin();
-            coords.push((x, y));
-        }
+
+        // Generate arc coordinates using iterator chain
+        let arc_coords: Vec<(Real, Real)> = (0..=segments)
+            .map(|i| {
+                let t = i as Real / (segments as Real);
+                let angle = start_rad + t * sweep;
+                let x = radius * angle.cos();
+                let y = radius * angle.sin();
+                (x, y)
+            })
+            .collect();
+
+        coords.extend(arc_coords);
         coords.push((0.0, 0.0)); // close explicitly
 
         let polygon_2d = GeoPolygon::new(LineString::from(coords), vec![]);
@@ -173,16 +179,18 @@ impl<S: Clone + Debug + Send + Sync> CSG<S> {
             (term1 + term2).powf(-1.0 / n1)
         }
 
-        let mut coords = Vec::with_capacity(segments + 1);
-        for i in 0..segments {
-            let frac = i as Real / (segments as Real);
-            let theta = TAU * frac;
-            let r = supershape_r(theta, a, b, m, n1, n2, n3);
+        // Generate supershape coordinates using iterator patterns
+        let mut coords: Vec<(Real, Real)> = (0..segments)
+            .map(|i| {
+                let frac = i as Real / (segments as Real);
+                let theta = TAU * frac;
+                let r = supershape_r(theta, a, b, m, n1, n2, n3);
 
-            let x = r * theta.cos();
-            let y = r * theta.sin();
-            coords.push((x, y));
-        }
+                let x = r * theta.cos();
+                let y = r * theta.sin();
+                (x, y)
+            })
+            .collect();
         // close it
         coords.push(coords[0]);
 
