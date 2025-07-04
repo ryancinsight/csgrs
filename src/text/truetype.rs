@@ -71,31 +71,34 @@ impl<S: Clone + Debug + Send + Sync> CSG<S> {
                     // Handle all CLOSED subpaths (which might be outer shapes or holes):
                     // -------------------------
                     if !collector.contours.is_empty() {
-                        // We can have multiple outer loops and multiple inner loops (holes).
-                        let mut outer_rings = Vec::new();
-                        let mut hole_rings = Vec::new();
+                        // Process contours using iterator patterns with filter_map()
+                        let (mut outer_rings, hole_rings): (Vec<_>, Vec<_>) = collector.contours
+                            .into_iter()
+                            .filter_map(|closed_pts| {
+                                if closed_pts.len() < 3 {
+                                    return None; // degenerate
+                                }
 
-                        for closed_pts in collector.contours {
-                            if closed_pts.len() < 3 {
-                                continue; // degenerate
-                            }
+                                let ring = LineString::from(closed_pts);
+                                let tmp_poly = GeoPolygon::new(ring.clone(), vec![]);
+                                let area = tmp_poly.signed_area();
 
-                            let ring = LineString::from(closed_pts);
-
-                            // We need to measure signed area.  The `signed_area` method works on a Polygon,
-                            // so construct a temporary single-ring polygon:
-                            let tmp_poly = GeoPolygon::new(ring.clone(), vec![]);
-                            let area = tmp_poly.signed_area();
-
-                            // ttf files store outer loops as CW and inner loops as CCW
-                            if area < 0.0 {
-                                // This is an outer ring
-                                outer_rings.push(ring);
-                            } else {
-                                // This is a hole ring
-                                hole_rings.push(ring);
-                            }
-                        }
+                                // ttf files store outer loops as CW and inner loops as CCW
+                                if area < 0.0 {
+                                    Some((Some(ring), None)) // outer ring
+                                } else {
+                                    Some((None, Some(ring))) // hole ring
+                                }
+                            })
+                            .fold((Vec::new(), Vec::new()), |(mut outers, mut holes), (outer, hole)| {
+                                if let Some(o) = outer {
+                                    outers.push(o);
+                                }
+                                if let Some(h) = hole {
+                                    holes.push(h);
+                                }
+                                (outers, holes)
+                            });
 
                         // Typically, a TrueType glyph has exactly one outer ring and 0+ holes.
                         // But in some tricky glyphs, you might see multiple separate outer rings.
@@ -109,26 +112,27 @@ impl<S: Clone + Debug + Send + Sync> CSG<S> {
                             let oriented = polygon_2d.orient(Direction::Default);
                             geo_coll.0.push(Geometry::Polygon(oriented));
 
-                            // If there are leftover outer rings, push them each as a separate polygon (no holes):
-                            // todo: test bounding boxes and sort holes appropriately
-                            for extra_outer in outer_rings {
-                                let poly_2d = GeoPolygon::new(extra_outer, vec![]);
-                                let oriented = poly_2d.orient(Direction::Default);
-                                geo_coll.0.push(Geometry::Polygon(oriented));
-                            }
+                            // Process leftover outer rings using iterator patterns
+                            outer_rings
+                                .into_iter()
+                                .map(|extra_outer| {
+                                    let poly_2d = GeoPolygon::new(extra_outer, vec![]);
+                                    poly_2d.orient(Direction::Default)
+                                })
+                                .for_each(|oriented| {
+                                    geo_coll.0.push(Geometry::Polygon(oriented));
+                                });
                         }
                     }
 
-                    // -------------------------
-                    // Handle all OPEN subpaths => store as LineStrings:
-                    // -------------------------
-                    for open_pts in collector.open_contours {
-                        if open_pts.len() >= 2 {
-                            geo_coll
-                                .0
-                                .push(Geometry::LineString(LineString::from(open_pts)));
-                        }
-                    }
+                    // Handle all OPEN subpaths using iterator patterns
+                    collector.open_contours
+                        .into_iter()
+                        .filter(|open_pts| open_pts.len() >= 2)
+                        .map(|open_pts| Geometry::LineString(LineString::from(open_pts)))
+                        .for_each(|line_geom| {
+                            geo_coll.0.push(line_geom);
+                        });
 
                     // Finally, advance our pen by the glyph's bounding-box width
                     let bbox = outline.bbox();
@@ -230,13 +234,18 @@ impl OutlineFlattener {
         let (px2, py2) = self.tx(x2, y2);
 
         // B(t) = (1 - t)^2 * p0 + 2(1 - t)t * cp + t^2 * p2
-        for i in 1..=steps {
-            let t = i as Real / steps as Real;
-            let mt = 1.0 - t;
-            let bx = mt * mt * px0 + 2.0 * mt * t * px1 + t * t * px2;
-            let by = mt * mt * py0 + 2.0 * mt * t * py1 + t * t * py2;
-            self.current.push((bx, by));
-        }
+        // Use iterator patterns for curve point generation
+        (1..=steps)
+            .map(|i| {
+                let t = i as Real / steps as Real;
+                let mt = 1.0 - t;
+                let bx = mt * mt * px0 + 2.0 * mt * t * px1 + t * t * px2;
+                let by = mt * mt * py0 + 2.0 * mt * t * py1 + t * t * py2;
+                (bx, by)
+            })
+            .for_each(|point| {
+                self.current.push(point);
+            });
         self.last_pt = (px2, py2);
     }
 
@@ -249,15 +258,20 @@ impl OutlineFlattener {
         let (px3, py3) = self.tx(x3, y3);
 
         // B(t) = (1-t)^3 p0 + 3(1-t)^2 t c1 + 3(1-t) t^2 c2 + t^3 p3
-        for i in 1..=steps {
-            let t = i as Real / steps as Real;
-            let mt = 1.0 - t;
-            let mt2 = mt * mt;
-            let t2 = t * t;
-            let bx = mt2 * mt * px0 + 3.0 * mt2 * t * cx1 + 3.0 * mt * t2 * cx2 + t2 * t * px3;
-            let by = mt2 * mt * py0 + 3.0 * mt2 * t * cy1 + 3.0 * mt * t2 * cy2 + t2 * t * py3;
-            self.current.push((bx, by));
-        }
+        // Use iterator patterns for cubic curve point generation
+        (1..=steps)
+            .map(|i| {
+                let t = i as Real / steps as Real;
+                let mt = 1.0 - t;
+                let mt2 = mt * mt;
+                let t2 = t * t;
+                let bx = mt2 * mt * px0 + 3.0 * mt2 * t * cx1 + 3.0 * mt * t2 * cx2 + t2 * t * px3;
+                let by = mt2 * mt * py0 + 3.0 * mt2 * t * cy1 + 3.0 * mt * t2 * cy2 + t2 * t * py3;
+                (bx, by)
+            })
+            .for_each(|point| {
+                self.current.push(point);
+            });
         self.last_pt = (px3, py3);
     }
 

@@ -111,18 +111,20 @@ pub fn polygon_bounds<S: Clone>(polygon: &Polygon<S>) -> Option<Aabb> {
     }
 
     let first_pos = polygon.vertices[0].pos;
-    let mut min = first_pos;
-    let mut max = first_pos;
 
-    for vertex in &polygon.vertices[1..] {
-        let pos = vertex.pos;
-        min.x = min.x.min(pos.x);
-        min.y = min.y.min(pos.y);
-        min.z = min.z.min(pos.z);
-        max.x = max.x.max(pos.x);
-        max.y = max.y.max(pos.y);
-        max.z = max.z.max(pos.z);
-    }
+    // Use fold() for efficient bounding box computation
+    let (min, max) = polygon.vertices[1..]
+        .iter()
+        .map(|vertex| vertex.pos)
+        .fold((first_pos, first_pos), |(mut min, mut max), pos| {
+            min.x = min.x.min(pos.x);
+            min.y = min.y.min(pos.y);
+            min.z = min.z.min(pos.z);
+            max.x = max.x.max(pos.x);
+            max.y = max.y.max(pos.y);
+            max.z = max.z.max(pos.z);
+            (min, max)
+        });
 
     Some(Aabb::new(min, max))
 }
@@ -157,17 +159,19 @@ pub fn polygon_area<S: Clone>(polygon: &Polygon<S>) -> Real {
         return 0.0;
     }
 
-    let mut area = 0.0;
     let n = polygon.vertices.len();
 
-    for i in 0..n {
-        let j = (i + 1) % n;
-        let vi = polygon.vertices[i].pos;
-        let vj = polygon.vertices[j].pos;
-        
-        // Cross product contribution to area
-        area += vi.x * vj.y - vj.x * vi.y;
-    }
+    // Use enumerate() and fold() for efficient area calculation
+    let area = (0..n)
+        .map(|i| {
+            let j = (i + 1) % n;
+            let vi = polygon.vertices[i].pos;
+            let vj = polygon.vertices[j].pos;
+
+            // Cross product contribution to area
+            vi.x * vj.y - vj.x * vi.y
+        })
+        .fold(0.0, |acc, contribution| acc + contribution);
 
     (area * 0.5).abs()
 }
@@ -196,11 +200,12 @@ pub fn polygon_area<S: Clone>(polygon: &Polygon<S>) -> Real {
 /// ```
 #[inline]
 pub fn polygon_intersects_bounds<S: Clone>(polygon: &Polygon<S>, bounds: &Aabb) -> bool {
-    // Check if any vertex is inside the bounds
-    for vertex in &polygon.vertices {
-        if bounds.contains_point(&vertex.pos) {
-            return true;
-        }
+    // Check if any vertex is inside the bounds using any() for early termination
+    if polygon.vertices
+        .iter()
+        .any(|vertex| bounds.contains_point(&vertex.pos))
+    {
+        return true;
     }
 
     // Check if polygon bounding box intersects query bounds
@@ -362,17 +367,65 @@ pub fn bounds_union(bounds: &[Aabb]) -> Aabb {
         return Aabb::new(Point3::origin(), Point3::origin());
     }
 
-    let mut min = bounds[0].min;
-    let mut max = bounds[0].max;
+    // Use fold() for efficient bounds merging with parallel processing for large datasets
+    #[cfg(feature = "parallel")]
+    let (min, max) = {
+        if bounds.len() > 1000 {
+            use rayon::prelude::*;
 
-    for bound in &bounds[1..] {
-        min.x = min.x.min(bound.min.x);
-        min.y = min.y.min(bound.min.y);
-        min.z = min.z.min(bound.min.z);
-        max.x = max.x.max(bound.max.x);
-        max.y = max.y.max(bound.max.y);
-        max.z = max.z.max(bound.max.z);
-    }
+            bounds[1..]
+                .par_iter()
+                .fold(
+                    || (bounds[0].min, bounds[0].max),
+                    |(mut min, mut max), bound| {
+                        min.x = min.x.min(bound.min.x);
+                        min.y = min.y.min(bound.min.y);
+                        min.z = min.z.min(bound.min.z);
+                        max.x = max.x.max(bound.max.x);
+                        max.y = max.y.max(bound.max.y);
+                        max.z = max.z.max(bound.max.z);
+                        (min, max)
+                    }
+                )
+                .reduce(
+                    || (bounds[0].min, bounds[0].max),
+                    |(mut min1, mut max1), (min2, max2)| {
+                        min1.x = min1.x.min(min2.x);
+                        min1.y = min1.y.min(min2.y);
+                        min1.z = min1.z.min(min2.z);
+                        max1.x = max1.x.max(max2.x);
+                        max1.y = max1.y.max(max2.y);
+                        max1.z = max1.z.max(max2.z);
+                        (min1, max1)
+                    }
+                )
+        } else {
+            bounds[1..]
+                .iter()
+                .fold((bounds[0].min, bounds[0].max), |(mut min, mut max), bound| {
+                    min.x = min.x.min(bound.min.x);
+                    min.y = min.y.min(bound.min.y);
+                    min.z = min.z.min(bound.min.z);
+                    max.x = max.x.max(bound.max.x);
+                    max.y = max.y.max(bound.max.y);
+                    max.z = max.z.max(bound.max.z);
+                    (min, max)
+                })
+        }
+    };
+
+    #[cfg(not(feature = "parallel"))]
+    let (min, max) = bounds[1..]
+        .iter()
+        .fold((bounds[0].min, bounds[0].max), |(mut min, mut max), bound| {
+            min.x = min.x.min(bound.min.x);
+            min.y = min.y.min(bound.min.y);
+            min.z = min.z.min(bound.min.z);
+            max.x = max.x.max(bound.max.x);
+            max.y = max.y.max(bound.max.y);
+            max.z = max.z.max(bound.max.z);
+            (min, max)
+        });
 
     Aabb::new(min, max)
 }

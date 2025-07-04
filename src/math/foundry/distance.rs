@@ -201,6 +201,126 @@ pub fn vector_distance(a: &Vector3<Real>, b: &Vector3<Real>) -> Real {
     (b - a).norm()
 }
 
+/// **Batch distance calculations with parallel processing**
+///
+/// Computes distances between corresponding pairs of points with intelligent
+/// parallel processing for large datasets.
+///
+/// # Arguments
+/// * `points_a` - First set of points
+/// * `points_b` - Second set of points (must have same length as points_a)
+///
+/// # Returns
+/// * `Vec<Real>` - Vector of distances between corresponding point pairs
+///
+/// # Examples
+/// ```rust
+/// use csgrs::math::foundry::distance::batch_euclidean_distances;
+/// use nalgebra::Point3;
+///
+/// let points_a = vec![Point3::new(0.0, 0.0, 0.0), Point3::new(1.0, 0.0, 0.0)];
+/// let points_b = vec![Point3::new(3.0, 4.0, 0.0), Point3::new(4.0, 4.0, 0.0)];
+/// let distances = batch_euclidean_distances(&points_a, &points_b);
+/// assert_eq!(distances.len(), 2);
+/// assert_eq!(distances[0], 5.0); // 3-4-5 triangle
+/// assert_eq!(distances[1], 5.0); // 3-4-5 triangle
+/// ```
+pub fn batch_euclidean_distances(points_a: &[Point3<Real>], points_b: &[Point3<Real>]) -> Vec<Real> {
+    assert_eq!(points_a.len(), points_b.len(), "Point arrays must have the same length");
+
+    #[cfg(feature = "parallel")]
+    {
+        if points_a.len() > 1000 {
+            use rayon::prelude::*;
+
+            // Use parallel processing for large datasets
+            points_a
+                .par_iter()
+                .zip(points_b.par_iter())
+                .map(|(a, b)| euclidean_distance(a, b))
+                .collect()
+        } else {
+            // Sequential processing for smaller datasets
+            points_a
+                .iter()
+                .zip(points_b.iter())
+                .map(|(a, b)| euclidean_distance(a, b))
+                .collect()
+        }
+    }
+
+    #[cfg(not(feature = "parallel"))]
+    {
+        points_a
+            .iter()
+            .zip(points_b.iter())
+            .map(|(a, b)| euclidean_distance(a, b))
+            .collect()
+    }
+}
+
+/// **Find nearest neighbor with parallel processing**
+///
+/// Finds the nearest neighbor to a query point from a collection of candidate points
+/// using parallel processing for large datasets.
+///
+/// # Arguments
+/// * `query_point` - The point to find neighbors for
+/// * `candidates` - Collection of candidate points
+///
+/// # Returns
+/// * `Option<(usize, Real)>` - Index and distance of nearest neighbor, or None if candidates is empty
+///
+/// # Examples
+/// ```rust
+/// use csgrs::math::foundry::distance::find_nearest_neighbor;
+/// use nalgebra::Point3;
+///
+/// let query = Point3::new(0.0, 0.0, 0.0);
+/// let candidates = vec![
+///     Point3::new(1.0, 0.0, 0.0),
+///     Point3::new(0.0, 2.0, 0.0),
+///     Point3::new(0.5, 0.0, 0.0),
+/// ];
+/// let result = find_nearest_neighbor(&query, &candidates);
+/// assert_eq!(result, Some((2, 0.5))); // Third point is closest
+/// ```
+pub fn find_nearest_neighbor(query_point: &Point3<Real>, candidates: &[Point3<Real>]) -> Option<(usize, Real)> {
+    if candidates.is_empty() {
+        return None;
+    }
+
+    #[cfg(feature = "parallel")]
+    {
+        if candidates.len() > 1000 {
+            use rayon::prelude::*;
+
+            // Use parallel processing for large datasets
+            candidates
+                .par_iter()
+                .enumerate()
+                .map(|(idx, candidate)| (idx, euclidean_distance(query_point, candidate)))
+                .min_by(|(_, dist_a), (_, dist_b)| dist_a.partial_cmp(dist_b).unwrap_or(std::cmp::Ordering::Equal))
+        } else {
+            // Sequential processing for smaller datasets
+            candidates
+                .iter()
+                .enumerate()
+                .map(|(idx, candidate)| (idx, euclidean_distance(query_point, candidate)))
+                .min_by(|(_, dist_a), (_, dist_b)| dist_a.partial_cmp(dist_b).unwrap_or(std::cmp::Ordering::Equal))
+        }
+    }
+
+    #[cfg(not(feature = "parallel"))]
+    {
+        candidates
+            .iter()
+            .enumerate()
+            .map(|(idx, candidate)| (idx, euclidean_distance(query_point, candidate)))
+            .min_by(|(_, dist_a), (_, dist_b)| dist_a.partial_cmp(dist_b).unwrap_or(std::cmp::Ordering::Equal))
+    }
+}
+
 /// **Compute squared distance between two vectors**
 ///
 /// More efficient version of vector_distance that avoids the square root operation.

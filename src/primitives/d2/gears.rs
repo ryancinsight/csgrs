@@ -50,35 +50,43 @@ impl<S: Clone + Debug + Send + Sync> CSG<S> {
         let phi_p = involute_angle_at_radius(pitch_radius, rb);
         let phi_a = involute_angle_at_radius(ra, rb);
 
-        // Helper to build a single half‑flank (left‑hand)
-        let mut half_flank = Vec::<(Real, Real)>::with_capacity(segments_per_flank + 1);
-        for i in 0..=segments_per_flank {
-            let phi = phi_p + (phi_a - phi_p) * (i as Real) / (segments_per_flank as Real);
-            let (ix, iy) = involute_xy(rb, phi);
-            let theta = (iy).atan2(ix); // polar angle of involute point
-            let global_theta = -tooth_thick_ang + theta; // left side offset
-            let r = (ix * ix + iy * iy).sqrt();
-            half_flank.push((r * global_theta.cos(), r * global_theta.sin()));
-        }
+        // Helper to build a single half‑flank (left‑hand) using iterator patterns
+        let half_flank: Vec<(Real, Real)> = (0..=segments_per_flank)
+            .map(|i| {
+                let phi = phi_p + (phi_a - phi_p) * (i as Real) / (segments_per_flank as Real);
+                let (ix, iy) = involute_xy(rb, phi);
+                let theta = (iy).atan2(ix); // polar angle of involute point
+                let global_theta = -tooth_thick_ang + theta; // left side offset
+                let r = (ix * ix + iy * iy).sqrt();
+                (r * global_theta.cos(), r * global_theta.sin())
+            })
+            .collect();
 
-        // Mirror to get right‑hand flank (reverse order so outline is CCW)
-        let mut full_tooth = half_flank;
-        for i in (0..full_tooth.len()).rev() {
-            let (x, y) = full_tooth[i];
-            // mirror across X axis and shift right
-            let theta = (-y).atan2(x);
-            let r = (x * x + y * y).sqrt();
-            let global_theta = tooth_thick_ang - theta;
-            full_tooth.push((r * global_theta.cos(), r * global_theta.sin()));
-        }
+        // Mirror to get right‑hand flank (reverse order so outline is CCW) using iterator patterns
+        let mut full_tooth = half_flank.clone();
+        let mirrored_points: Vec<(Real, Real)> = half_flank
+            .iter()
+            .rev()
+            .map(|&(x, y)| {
+                // mirror across X axis and shift right
+                let theta = (-y).atan2(x);
+                let r = (x * x + y * y).sqrt();
+                let global_theta = tooth_thick_ang - theta;
+                (r * global_theta.cos(), r * global_theta.sin())
+            })
+            .collect();
+        full_tooth.extend(mirrored_points);
 
-        // Root circle arc between successive teeth
+        // Root circle arc between successive teeth using iterator patterns
         let root_arc_steps = 4;
         let arc_step = (ang_pitch - 2.0 * tooth_thick_ang) / (root_arc_steps as Real);
-        for i in 1..=root_arc_steps {
-            let ang = tooth_thick_ang + (i as Real) * arc_step;
-            full_tooth.push((rf * (ang).cos(), rf * (ang).sin()));
-        }
+        let root_arc_points: Vec<(Real, Real)> = (1..=root_arc_steps)
+            .map(|i| {
+                let ang = tooth_thick_ang + (i as Real) * arc_step;
+                (rf * (ang).cos(), rf * (ang).sin())
+            })
+            .collect();
+        full_tooth.extend(root_arc_points);
 
         // Replicate the tooth profile around the gear
         let mut outline = Vec::<[Real; 2]>::with_capacity(full_tooth.len() * teeth + 1);
@@ -132,13 +140,15 @@ impl<S: Clone + Debug + Send + Sync> CSG<S> {
 
         let mut tooth_points = Vec::<(Real, Real)>::new();
 
-        // 1. addendum epicycloid (tip)
-        for i in 0..=flank_steps {
-            let t = (i as Real) / (flank_steps as Real);
-            let theta = t * ang_pitch / 2.0;
-            let (x, y) = epicycloid_xy(r_p, r_pin, theta);
-            tooth_points.push((x, y));
-        }
+        // 1. addendum epicycloid (tip) using iterator patterns
+        let addendum_points: Vec<(Real, Real)> = (0..=flank_steps)
+            .map(|i| {
+                let t = (i as Real) / (flank_steps as Real);
+                let theta = t * ang_pitch / 2.0;
+                epicycloid_xy(r_p, r_pin, theta)
+            })
+            .collect();
+        tooth_points.extend(addendum_points);
         // 2. hypocycloid root (reverse order to keep CCW)
         for i in (0..=flank_steps).rev() {
             let t = (i as Real) / (flank_steps as Real);

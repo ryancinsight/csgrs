@@ -79,16 +79,55 @@ impl<S: Clone + Debug + Send + Sync> CSG<S> {
         let dz = thickness / (slices as Real);
         let d_ψ = helix_angle_deg.to_radians() / (slices as Real);
 
-        let mut acc = CSG::<S>::new();
-        let mut z_curr = 0.0;
-        for i in 0..slices {
-            let slice = base_slice
-                .rotate(0.0, 0.0, (i as Real) * d_ψ.to_degrees())
-                .extrude(dz)
-                .translate(0.0, 0.0, z_curr);
-            acc = if i == 0 { slice } else { acc.union(&slice) };
-            z_curr += dz;
-        }
-        acc
+        // Generate helical gear slices using iterator patterns with parallel processing
+        #[cfg(feature = "parallel")]
+        let gear_slices: Vec<CSG<S>> = {
+            if slices > 100 {
+                use rayon::prelude::*;
+
+                (0..slices)
+                    .into_par_iter()
+                    .map(|i| {
+                        let z_curr = (i as Real) * dz;
+                        base_slice
+                            .rotate(0.0, 0.0, (i as Real) * d_ψ.to_degrees())
+                            .extrude(dz)
+                            .translate(0.0, 0.0, z_curr)
+                    })
+                    .collect()
+            } else {
+                (0..slices)
+                    .map(|i| {
+                        let z_curr = (i as Real) * dz;
+                        base_slice
+                            .rotate(0.0, 0.0, (i as Real) * d_ψ.to_degrees())
+                            .extrude(dz)
+                            .translate(0.0, 0.0, z_curr)
+                    })
+                    .collect()
+            }
+        };
+
+        #[cfg(not(feature = "parallel"))]
+        let gear_slices: Vec<CSG<S>> = (0..slices)
+            .map(|i| {
+                let z_curr = (i as Real) * dz;
+                base_slice
+                    .rotate(0.0, 0.0, (i as Real) * d_ψ.to_degrees())
+                    .extrude(dz)
+                    .translate(0.0, 0.0, z_curr)
+            })
+            .collect();
+
+        // Union all slices using fold() for efficient accumulation
+        gear_slices
+            .into_iter()
+            .fold(CSG::<S>::new(), |acc, slice| {
+                if acc.polygons.is_empty() && acc.geometry.is_empty() {
+                    slice
+                } else {
+                    acc.union(&slice)
+                }
+            })
     }
 }

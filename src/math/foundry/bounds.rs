@@ -25,10 +25,11 @@
 use crate::core::float_types::{parry3d::bounding_volume::{Aabb, BoundingVolume}, Real};
 use nalgebra::Point3;
 
-/// **Compute the union of multiple AABBs**
+/// **Compute the union of multiple AABBs with parallel processing**
 ///
 /// This function computes the smallest AABB that contains all input AABBs.
-/// It's the canonical implementation for AABB union operations.
+/// It's the canonical implementation for AABB union operations with intelligent
+/// parallel processing for large datasets.
 ///
 /// ## **Mathematical Definition**
 /// For AABBs A₁, A₂, ..., Aₙ:
@@ -63,10 +64,30 @@ pub fn aabb_union(aabbs: &[Aabb]) -> Option<Aabb> {
         return None;
     }
 
-    let mut result = aabbs[0];
-    for aabb in &aabbs[1..] {
-        result = result.merged(aabb);
+    #[cfg(feature = "parallel")]
+    {
+        if aabbs.len() > 1000 {
+            use rayon::prelude::*;
+
+            // Use parallel processing for large datasets
+            let result = aabbs[1..]
+                .par_iter()
+                .fold(
+                    || aabbs[0],
+                    |acc, aabb| acc.merged(aabb)
+                )
+                .reduce(
+                    || aabbs[0],
+                    |a, b| a.merged(&b)
+                );
+            return Some(result);
+        }
     }
+
+    // Sequential processing for smaller datasets or when parallel feature is disabled
+    let result = aabbs[1..]
+        .iter()
+        .fold(aabbs[0], |acc, aabb| acc.merged(aabb));
     Some(result)
 }
 
@@ -322,6 +343,98 @@ pub fn aabb_expand(aabb: &Aabb, margin: Real) -> Aabb {
         Point3::from(aabb.mins.coords - margin_vec),
         Point3::from(aabb.maxs.coords + margin_vec),
     )
+}
+
+/// **Batch point containment testing with parallel processing**
+///
+/// Tests whether multiple points are contained within an AABB using intelligent
+/// parallel processing for large datasets.
+///
+/// # Arguments
+/// * `aabb` - The bounding box to test against
+/// * `points` - Slice of points to test
+///
+/// # Returns
+/// * `Vec<bool>` - Vector indicating containment for each point
+///
+/// # Examples
+/// ```rust
+/// use csgrs::math::foundry::bounds::batch_aabb_contains_points;
+/// use csgrs::core::float_types::parry3d::bounding_volume::Aabb;
+/// use nalgebra::Point3;
+///
+/// let aabb = Aabb::new(Point3::new(0.0, 0.0, 0.0), Point3::new(1.0, 1.0, 1.0));
+/// let points = vec![
+///     Point3::new(0.5, 0.5, 0.5),  // inside
+///     Point3::new(1.5, 0.5, 0.5),  // outside
+/// ];
+/// let results = batch_aabb_contains_points(&aabb, &points);
+/// assert_eq!(results, vec![true, false]);
+/// ```
+pub fn batch_aabb_contains_points(aabb: &Aabb, points: &[Point3<Real>]) -> Vec<bool> {
+    #[cfg(feature = "parallel")]
+    {
+        if points.len() > 1000 {
+            use rayon::prelude::*;
+
+            // Use parallel processing for large datasets
+            return points
+                .par_iter()
+                .map(|point| aabb_contains_point(aabb, point))
+                .collect();
+        }
+    }
+
+    // Sequential processing for smaller datasets or when parallel feature is disabled
+    points
+        .iter()
+        .map(|point| aabb_contains_point(aabb, point))
+        .collect()
+}
+
+/// **Batch AABB volume calculations with parallel processing**
+///
+/// Computes volumes for multiple AABBs using intelligent parallel processing
+/// for large datasets.
+///
+/// # Arguments
+/// * `aabbs` - Slice of AABBs to compute volumes for
+///
+/// # Returns
+/// * `Vec<Real>` - Vector of volumes for each AABB
+///
+/// # Examples
+/// ```rust
+/// use csgrs::math::foundry::bounds::batch_aabb_volumes;
+/// use csgrs::core::float_types::parry3d::bounding_volume::Aabb;
+/// use nalgebra::Point3;
+///
+/// let aabbs = vec![
+///     Aabb::new(Point3::new(0.0, 0.0, 0.0), Point3::new(1.0, 1.0, 1.0)),
+///     Aabb::new(Point3::new(0.0, 0.0, 0.0), Point3::new(2.0, 2.0, 2.0)),
+/// ];
+/// let volumes = batch_aabb_volumes(&aabbs);
+/// assert_eq!(volumes, vec![1.0, 8.0]);
+/// ```
+pub fn batch_aabb_volumes(aabbs: &[Aabb]) -> Vec<Real> {
+    #[cfg(feature = "parallel")]
+    {
+        if aabbs.len() > 1000 {
+            use rayon::prelude::*;
+
+            // Use parallel processing for large datasets
+            return aabbs
+                .par_iter()
+                .map(|aabb| aabb_volume(aabb))
+                .collect();
+        }
+    }
+
+    // Sequential processing for smaller datasets or when parallel feature is disabled
+    aabbs
+        .iter()
+        .map(|aabb| aabb_volume(aabb))
+        .collect()
 }
 
 #[cfg(test)]

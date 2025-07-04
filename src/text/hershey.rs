@@ -26,37 +26,60 @@ impl<S: Clone + Debug + Send + Sync> CSG<S> {
         let mut all_strokes = Vec::new();
         let mut cursor_x: Real = 0.0;
 
-        for ch in text.chars() {
-            // Skip control chars or spaces as needed
-            if ch.is_control() {
-                continue;
+        // Process characters using iterator patterns with parallel processing for large text
+        #[cfg(feature = "parallel")]
+        let character_strokes: Vec<(Vec<LineString<Real>>, Real)> = {
+            if text.len() > 50 {
+                use rayon::prelude::*;
+
+                text.chars()
+                    .filter(|ch| !ch.is_control())
+                    .collect::<Vec<_>>()
+                    .par_iter()
+                    .enumerate()
+                    .map(|(i, &ch)| {
+                        let char_cursor_x = (i as Real) * size * 6.0; // Approximate spacing
+                        process_hershey_character(&font, ch, size, char_cursor_x)
+                    })
+                    .collect()
+            } else {
+                text.chars()
+                    .filter(|ch| !ch.is_control())
+                    .enumerate()
+                    .map(|(i, ch)| {
+                        let char_cursor_x = (i as Real) * size * 6.0; // Approximate spacing
+                        process_hershey_character(&font, ch, size, char_cursor_x)
+                    })
+                    .collect()
             }
+        };
 
-            // Attempt to find a glyph in this font
-            match font.glyph(ch) {
-                Ok(glyph) => {
-                    // Convert the Hershey lines to geo::LineString objects
-                    let glyph_width = (glyph.max_x - glyph.min_x) as Real;
-                    let strokes = build_hershey_glyph_lines(&glyph, size, cursor_x, 0.0);
+        #[cfg(not(feature = "parallel"))]
+        let character_strokes: Vec<(Vec<LineString<Real>>, Real)> = text.chars()
+            .filter(|ch| !ch.is_control())
+            .enumerate()
+            .map(|(i, ch)| {
+                let char_cursor_x = (i as Real) * size * 6.0; // Approximate spacing
+                process_hershey_character(&font, ch, size, char_cursor_x)
+            })
+            .collect();
 
-                    // Collect them
-                    all_strokes.extend(strokes);
+        // Accumulate strokes and calculate final cursor position using fold()
+        let (final_cursor_x, _) = character_strokes
+            .into_iter()
+            .fold((0.0, &mut all_strokes), |(mut cursor_x, strokes), (char_strokes, advance)| {
+                strokes.extend(char_strokes);
+                cursor_x += advance;
+                (cursor_x, strokes)
+            });
 
-                    // Advance the pen in X
-                    cursor_x += glyph_width * size * 0.8;
-                },
-                Err(_) => {
-                    // Missing glyph => skip or just advance
-                    cursor_x += 6.0 * size;
-                },
-            }
-        }
-
-        // Insert each stroke as a separate LineString in the geometry
-        let mut geo_coll = GeometryCollection::default();
-        for line_str in all_strokes {
-            geo_coll.0.push(Geometry::LineString(line_str));
-        }
+        // Insert each stroke using iterator patterns
+        let geo_coll = GeometryCollection(
+            all_strokes
+                .into_iter()
+                .map(|line_str| Geometry::LineString(line_str))
+                .collect()
+        );
 
         // Return a new CSG that has no 3D polygons, but has these lines in geometry.
         CSG {
@@ -83,26 +106,33 @@ fn build_hershey_glyph_lines(
     // resetting whenever Hershey issues a "MoveTo"
     let mut current_coords = Vec::new();
 
-    for vector_cmd in &glyph.vectors {
-        match vector_cmd {
-            HersheyVector::MoveTo { x, y } => {
-                // If we already had 2+ points, that stroke is complete:
-                if current_coords.len() >= 2 {
-                    strokes.push(LineString::from(current_coords));
-                }
-                // Start a new stroke
-                current_coords = Vec::new();
-                let px = offset_x + (*x as Real) * scale;
-                let py = offset_y + (*y as Real) * scale;
-                current_coords.push(coord! { x: px, y: py });
-            },
-            HersheyVector::LineTo { x, y } => {
-                let px = offset_x + (*x as Real) * scale;
-                let py = offset_y + (*y as Real) * scale;
-                current_coords.push(coord! { x: px, y: py });
-            },
-        }
-    }
+    // Process vector commands using iterator patterns with fold()
+    let (final_strokes, final_coords) = glyph.vectors
+        .iter()
+        .fold((strokes, current_coords), |(mut strokes, mut current_coords), vector_cmd| {
+            match vector_cmd {
+                HersheyVector::MoveTo { x, y } => {
+                    // If we already had 2+ points, that stroke is complete:
+                    if current_coords.len() >= 2 {
+                        strokes.push(LineString::from(current_coords));
+                    }
+                    // Start a new stroke
+                    current_coords = Vec::new();
+                    let px = offset_x + (*x as Real) * scale;
+                    let py = offset_y + (*y as Real) * scale;
+                    current_coords.push(coord! { x: px, y: py });
+                },
+                HersheyVector::LineTo { x, y } => {
+                    let px = offset_x + (*x as Real) * scale;
+                    let py = offset_y + (*y as Real) * scale;
+                    current_coords.push(coord! { x: px, y: py });
+                },
+            }
+            (strokes, current_coords)
+        });
+
+    strokes = final_strokes;
+    current_coords = final_coords;
 
     // End-of-glyph: if our final stroke has 2+ points, convert to a line string
     if current_coords.len() >= 2 {
@@ -110,4 +140,30 @@ fn build_hershey_glyph_lines(
     }
 
     strokes
+}
+
+/// **Helper function to process individual Hershey characters**
+///
+/// Processes a single character using the Hershey font, returning the strokes
+/// and the advance width for cursor positioning.
+fn process_hershey_character(
+    font: &HersheyFont,
+    ch: char,
+    size: Real,
+    cursor_x: Real,
+) -> (Vec<LineString<Real>>, Real) {
+    match font.glyph(ch) {
+        Ok(glyph) => {
+            // Convert the Hershey lines to geo::LineString objects
+            let glyph_width = (glyph.max_x - glyph.min_x) as Real;
+            let strokes = build_hershey_glyph_lines(&glyph, size, cursor_x, 0.0);
+            let advance = glyph_width * size * 0.8;
+            (strokes, advance)
+        },
+        Err(_) => {
+            // Missing glyph => return empty strokes with default advance
+            let advance = 6.0 * size;
+            (Vec::new(), advance)
+        },
+    }
 }
