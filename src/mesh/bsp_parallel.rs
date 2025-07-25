@@ -225,8 +225,21 @@ impl<S: Clone + Send + Sync + Debug> Node<S> {
 
                         // Pair up intersection points => edges
                         let mut edges = Vec::new();
+                        let cp_count = crossing_points.len();
                         for chunk in crossing_points.chunks_exact(2) {
                             edges.push([chunk[0].clone(), chunk[1].clone()]);
+                        }
+                        if cp_count % 2 == 1 && cp_count >= 3 {
+                            edges.push([
+                                crossing_points[cp_count - 1].clone(),
+                                crossing_points[0].clone(),
+                            ]);
+                        } else if cp_count % 2 == 1 {
+                            #[cfg(debug_assertions)]
+                            eprintln!(
+                                "[csgrs::bsp::parallel] Warning: single (unpaired) slice intersection at {:?}",
+                                crossing_points[0].pos
+                            );
                         }
                         (Vec::new(), edges)
                     },

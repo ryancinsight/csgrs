@@ -33,7 +33,14 @@ impl<S: Clone + Debug + Send + Sync> Mesh<S> {
         // Mesh the implicit surface with the generic surface‑nets backend
         let surf = Mesh::sdf(sdf_fn, resolution, min_pt, max_pt, iso_value, metadata);
         // Clip the infinite TPMS down to the original shape's volume
-        surf.intersection(self)
+        let mut clipped = surf.intersection(self);
+
+        // Final integrity pass – weld nearly-duplicate vertices that may arise
+        // from the CSG intersection.  This mitigates microscopic cracks along
+        // the sphere/TPMS interface which would otherwise appear as holes.
+        clipped.weld_vertices_mut(crate::float_types::EPSILON * 4.0);
+
+        clipped
     }
 
     // ------------  Specific minimal‑surface flavours  --------------------
