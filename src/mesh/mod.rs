@@ -474,7 +474,15 @@ impl<S: Clone + Send + Sync + Debug> CSG for Mesh<S> {
     ///          +-------+            +-------+
     /// ```
     fn union(&self, other: &Mesh<S>) -> Mesh<S> {
-        // avoid splitting obvious non‑intersecting faces
+        // Fast paths for degenerate cases -------------------------------------------------
+        if self.polygons.is_empty() {
+            return other.clone();
+        }
+        if other.polygons.is_empty() {
+            return self.clone();
+        }
+
+        // avoid splitting obvious non-intersecting faces
         let (a_clip, a_passthru) =
             Self::partition_polys(&self.polygons, &other.bounding_box());
         let (b_clip, b_passthru) =
@@ -516,7 +524,15 @@ impl<S: Clone + Send + Sync + Debug> CSG for Mesh<S> {
     ///          +-------+
     /// ```
     fn difference(&self, other: &Mesh<S>) -> Mesh<S> {
-        // avoid splitting obvious non‑intersecting faces
+        // Fast paths -------------------------------------------------------
+        if other.polygons.is_empty() {
+            return self.clone();
+        }
+        if self.polygons.is_empty() {
+            return Mesh::new();
+        }
+
+        // avoid splitting obvious non-intersecting faces
         let (a_clip, a_passthru) =
             Self::partition_polys(&self.polygons, &other.bounding_box());
         let (b_clip, _b_passthru) =
