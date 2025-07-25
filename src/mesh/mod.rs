@@ -95,6 +95,7 @@ impl<S: Clone + Send + Sync + Debug> Mesh<S> {
     ///
     /// Complexity: *O(n log n)* on average using spatial hashing.
     pub fn weld_vertices_mut(&mut self, tol: Real) {
+        use crate::mesh::plane::Plane;
         use hashbrown::HashMap;
 
         if self.polygons.is_empty() {
@@ -128,6 +129,15 @@ impl<S: Clone + Send + Sync + Debug> Mesh<S> {
                     vmap.insert(k, v.clone());
                 }
             }
+
+            // Recompute plane from (potentially modified) vertices so future
+            // BSP operations receive an accurate plane equation.  This small
+            // extra cost is negligible compared to the spatial-hash pass and
+            // pays for itself by preventing micro-cracks at Boolean junctions.
+            poly.plane = Plane::from_vertices(poly.vertices.clone());
+
+            // Invalidate cached bounding box because vertices may have moved.
+            poly.bounding_box = std::sync::OnceLock::new();
         }
 
         // Recompute bounding box because vertices moved (possibly collapsed).

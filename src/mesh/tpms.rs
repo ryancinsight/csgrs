@@ -27,18 +27,44 @@ impl<S: Clone + Debug + Send + Sync> Mesh<S> {
     where
         F: Fn(&Point3<Real>) -> Real + Send + Sync,
     {
+        use nalgebra::Vector3;
+
         let aabb = self.bounding_box();
-        let min_pt = aabb.mins;
-        let max_pt = aabb.maxs;
+        let mut min_pt = aabb.mins;
+        let mut max_pt = aabb.maxs;
+
+        // ------------------------------------------------------------------
+        //  Pad the AABB by **one voxel** on each side to guarantee that the
+        //  implicit surface is fully sampled at the solid boundary.  Without
+        //  this, aliasing can leave pin-holes where the TPMS meets the
+        //  bounding sphere (or any other host geometry).
+        // ------------------------------------------------------------------
+        let res_vec = Vector3::new(
+            resolution.0.max(2) as Real,
+            resolution.1.max(2) as Real,
+            resolution.2.max(2) as Real,
+        );
+
+        let diag = max_pt.coords - min_pt.coords;
+        let res_minus_one = res_vec - Vector3::repeat(1.0 as Real);
+        let cell = diag.component_div(&res_minus_one);
+
+        // One-cell padding each side
+        min_pt = min_pt - cell;
+        max_pt = max_pt + cell;
         // Mesh the implicit surface with the generic surface‑nets backend
         let surf = Mesh::sdf(sdf_fn, resolution, min_pt, max_pt, iso_value, metadata);
         // Clip the infinite TPMS down to the original shape's volume
         let mut clipped = surf.intersection(self);
 
-        // Final integrity pass – weld nearly-duplicate vertices that may arise
-        // from the CSG intersection.  This mitigates microscopic cracks along
-        // the sphere/TPMS interface which would otherwise appear as holes.
-        clipped.weld_vertices_mut(crate::float_types::EPSILON * 4.0);
+        // ------------------------------------------------------------------
+        //  Final integrity pass – vertex welding
+        // ------------------------------------------------------------------
+        //  Use a tolerance proportional to the sampling cell size.  This
+        //  scales naturally with user-supplied resolution and prevents both
+        //  under- and over-welding on very small or very large models.
+        let weld_tol = cell.x.min(cell.y.min(cell.z)); // smallest cell edge
+        clipped.weld_vertices_mut(weld_tol.max(crate::float_types::EPSILON * 4.0));
 
         clipped
     }
@@ -109,7 +135,7 @@ impl<S: Clone + Debug + Send + Sync> Mesh<S> {
         )
     }
 
-    /// Schwarz‑D (Diamond) surface:  `sin x sin y sin z + sin x cos y cos z + ... = iso`
+    /// Schwarz-D (Diamond) surface:  `sin x sin y sin z + sin x cos y cos z + ... = iso`
     /// **Mathematical Foundation**: Diamond surface exhibits tetrahedral symmetry and is self-intersecting.
     /// **Optimization**: Pre-compute all trigonometric values for maximum efficiency.
     pub fn schwarz_d(
