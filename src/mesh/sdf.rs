@@ -90,10 +90,17 @@ impl<S: Clone + Debug + Send + Sync> Mesh<S> {
                 let p = Point3::new(xf, yf, zf);
                 let sdf_val = sdf(&p);
 
+                // Robust finite value handling with mathematical correctness.  Non-finite
+                // values indicate evaluation outside the valid numeric domain (for
+                // example, a user-supplied SDF that returned `inf` or `NaN`).  We map
+                // those to a large positive number so the isosurface extractor treats
+                // them as “definitely outside”, which is the least-surprising behaviour
+                // and prevents errant holes.  (The exact constant is irrelevant as long
+                // as it is ≫ cell diagonal.)
                 *val = if sdf_val.is_finite() {
                     (sdf_val - iso_value) as f32
                 } else {
-                    1e10_f32
+                    1e10_f32 // fall-back for NaN/±∞
                 };
             });
 

@@ -833,4 +833,126 @@ impl<S: Clone + Send + Sync + Debug> CSG for Mesh<S> {
         mesh
     }
 
-    /// Returns a [`parry3d::bounding_volume::Aabb`
+    // ------------------------------------------------------------------
+    //  +++ Restored core CSG trait methods lost during refactor +++
+    // ------------------------------------------------------------------
+
+    /// Returns a [`parry3d::bounding_volume::Aabb`] indicating the 3D bounds of all `polygons`.
+    fn bounding_box(&self) -> Aabb {
+        *self.bounding_box.get_or_init(|| {
+            // Track overall min/max in x, y, z among all vertices.
+            let mut min_x = Real::MAX;
+            let mut min_y = Real::MAX;
+            let mut min_z = Real::MAX;
+            let mut max_x = -Real::MAX;
+            let mut max_y = -Real::MAX;
+            let mut max_z = -Real::MAX;
+
+            // 1) Gather from the 3D polygons
+            for poly in &self.polygons {
+                for v in &poly.vertices {
+                    // Use partial_min/max helpers to ignore NaNs
+                    if let Some(val) = partial_min(&min_x, &v.pos.x) {
+                        min_x = *val;
+                    }
+                    if let Some(val) = partial_min(&min_y, &v.pos.y) {
+                        min_y = *val;
+                    }
+                    if let Some(val) = partial_min(&min_z, &v.pos.z) {
+                        min_z = *val;
+                    }
+
+                    if let Some(val) = partial_max(&max_x, &v.pos.x) {
+                        max_x = *val;
+                    }
+                    if let Some(val) = partial_max(&max_y, &v.pos.y) {
+                        max_y = *val;
+                    }
+                    if let Some(val) = partial_max(&max_z, &v.pos.z) {
+                        max_z = *val;
+                    }
+                }
+            }
+
+            // If still uninitialized (e.g., empty mesh) → trivial AABB at origin
+            if min_x > max_x {
+                return Aabb::new(Point3::origin(), Point3::origin());
+            }
+
+            let mins = Point3::new(min_x, min_y, min_z);
+            let maxs = Point3::new(max_x, max_y, max_z);
+            Aabb::new(mins, maxs)
+        })
+    }
+
+    /// Invalidates object's cached bounding box so it will be recomputed lazily.
+    fn invalidate_bounding_box(&mut self) {
+        self.bounding_box = OnceLock::new();
+    }
+
+    /// Return a copy of `self` with polygons flipped (inside ↔ outside).
+    fn inverse(&self) -> Mesh<S> {
+        let mut mesh = self.clone();
+        for p in &mut mesh.polygons {
+            p.flip();
+        }
+        mesh
+    }
+}
+
+// ------------------------------------------------------------------
+//  Convert a 2-D Sketch into a 3-D Mesh lying on z=0 plane
+// ------------------------------------------------------------------
+impl<S: Clone + Send + Sync + Debug> From<Sketch<S>> for Mesh<S> {
+    fn from(sketch: Sketch<S>) -> Self {
+        use geo::Polygon as GeoPolygon;
+        // Helper: convert geo::Polygon to Mesh Polygons (on z=0)
+        fn geo_poly_to_csg_polys<S: Clone + Debug + Send + Sync>(
+            poly2d: &GeoPolygon<Real>,
+            metadata: &Option<S>,
+        ) -> Vec<Polygon<S>> {
+            let mut polys = Vec::new();
+
+            // Exterior ring
+            let exterior: Vec<_> = poly2d
+                .exterior()
+                .coords_iter()
+                .map(|c| Vertex::new(Point3::new(c.x, c.y, 0.0), Vector3::z()))
+                .collect();
+            if exterior.len() >= 3 {
+                polys.push(Polygon::new(exterior, metadata.clone()));
+            }
+
+            // Interior rings (holes)
+            for ring in poly2d.interiors() {
+                let hole: Vec<_> = ring
+                    .coords_iter()
+                    .map(|c| Vertex::new(Point3::new(c.x, c.y, 0.0), Vector3::z()))
+                    .collect();
+                if hole.len() >= 3 {
+                    polys.push(Polygon::new(hole, metadata.clone()));
+                }
+            }
+            polys
+        }
+
+        let polygons: Vec<Polygon<S>> = sketch
+            .geometry
+            .iter()
+            .flat_map(|geom| match geom {
+                geo::Geometry::Polygon(poly) => geo_poly_to_csg_polys(poly, &sketch.metadata),
+                geo::Geometry::MultiPolygon(multi) => multi
+                    .iter()
+                    .flat_map(|poly| geo_poly_to_csg_polys(poly, &sketch.metadata))
+                    .collect(),
+                _ => Vec::new(),
+            })
+            .collect();
+
+        Mesh {
+            polygons,
+            bounding_box: OnceLock::new(),
+            metadata: sketch.metadata,
+        }
+    }
+}
