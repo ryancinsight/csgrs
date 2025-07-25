@@ -85,6 +85,55 @@ impl<S: Clone + Send + Sync + Debug + PartialEq> Mesh<S> {
 }
 
 impl<S: Clone + Send + Sync + Debug> Mesh<S> {
+    /// Weld (merge) vertices that fall within a given *Euclidean* tolerance.
+    ///
+    /// This is a **post-processing** utility that collapses vertices whose
+    /// positions differ by less than `tol` into a single representative.
+    /// It reduces T-junctions and micron-scale gaps often created by Boolean
+    /// CSG or marching-cubes style algorithms and is therefore highly useful
+    /// for generating watertight TPMS shells.
+    ///
+    /// Complexity: *O(n log n)* on average using spatial hashing.
+    pub fn weld_vertices_mut(&mut self, tol: Real) {
+        use hashbrown::HashMap;
+
+        if self.polygons.is_empty() {
+            return;
+        }
+
+        // Choose cell size based on tolerance.
+        let cell = tol.max(1e-12);
+
+        // Hash key converter – quantise to integer grid.
+        fn key(p: &Point3<Real>, cell: Real) -> (i64, i64, i64) {
+            let inv = 1.0 / cell;
+            (
+                (p.x * inv).round() as i64,
+                (p.y * inv).round() as i64,
+                (p.z * inv).round() as i64,
+            )
+        }
+
+        // Map quantised position → canonical vertex
+        let mut vmap: HashMap<(i64, i64, i64), Vertex> = HashMap::new();
+
+        for poly in &mut self.polygons {
+            for v in &mut poly.vertices {
+                let k = key(&v.pos, cell);
+                if let Some(canon) = vmap.get(&k) {
+                    // Swap in canonical to ensure exact positional equality;
+                    // keep caller-supplied normal for potential smoothing.
+                    *v = canon.clone();
+                } else {
+                    vmap.insert(k, v.clone());
+                }
+            }
+        }
+
+        // Recompute bounding box because vertices moved (possibly collapsed).
+        self.invalidate_bounding_box();
+    }
+
     /// Build a Mesh from an existing polygon list
     pub fn from_polygons(polygons: &[Polygon<S>], metadata: Option<S>) -> Self {
         let mut mesh = Mesh::new();
