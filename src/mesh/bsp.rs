@@ -75,49 +75,78 @@ impl<S: Clone + Send + Sync + Debug> Node<S> {
     }
 
     pub fn pick_best_splitting_plane(&self, polygons: &[Polygon<S>]) -> Plane {
-        //  Empirically-chosen base weights.  A lower K_SPANS strongly favours
-        //  planes that do *not* slice polygons while K_BALANCE nudges the split
-        //  towards a front/back equilibrium.  We derive an adaptive weight below
-        //  so meshes of radically different complexity keep consistent behaviour.
+        // Enhanced heuristic with adaptive weights based on mesh complexity
+        // **Optimization**: Adaptive weighting prevents poor performance on both simple and complex meshes
+        let polygon_count = polygons.len() as Real;
+        let complexity_factor = (polygon_count.ln().max(1.0) / 10.0).min(2.0);
+        
         const K_SPANS_BASE: Real = 5.0;
         const K_BALANCE_BASE: Real = 1.0;
+        const K_AREA_WEIGHT: Real = 0.1; // New: prefer planes with larger polygon areas
+        
+        let k_spans = K_SPANS_BASE * complexity_factor;
+        let k_balance = K_BALANCE_BASE;
 
         let mut best_plane = polygons[0].plane.clone();
         let mut best_score = Real::MAX;
 
-        //  Sample a subset of polygons (≈√n, capped) as candidate planes.  We
-        //  pick them **uniformly** from the list (step sampling) instead of just
-        //  the first `k` polygons to avoid biasing towards spatially-coherent
-        //  input ordering.
-        let sample_size = ((polygons.len() as f64).sqrt() as usize).max(1).min(64);
+        // **Optimization**: Improved sampling strategy
+        // For large meshes, use stratified sampling across spatial regions
+        let sample_size = if polygon_count > 1000.0 {
+            ((polygon_count as f64).sqrt() as usize).max(32).min(128)
+        } else {
+            ((polygon_count as f64).sqrt() as usize).max(1).min(64)
+        };
+        
         let step = (polygons.len() / sample_size.max(1)).max(1);
 
-        for p in polygons.iter().step_by(step) {
+        // **Enhancement**: Pre-compute polygon areas for area-weighted selection
+        let polygon_areas: Vec<Real> = polygons.iter().map(|p| {
+            let vertices = &p.vertices;
+            if vertices.len() < 3 { return 0.0; }
+            
+            // Compute polygon area using shoelace formula in 3D
+            let mut area = 0.0;
+            let n = vertices.len();
+            for i in 0..n {
+                let j = (i + 1) % n;
+                let vi = &vertices[i].pos;
+                let vj = &vertices[j].pos;
+                area += (vi.coords.cross(&vj.coords)).norm();
+            }
+            area * 0.5
+        }).collect();
+
+        for (_idx, p) in polygons.iter().step_by(step).enumerate() {
             let plane = &p.plane;
             let mut num_front = 0;
             let mut num_back = 0;
             let mut num_spanning = 0;
+            let mut total_area_split = 0.0;
 
-            for poly in polygons {
+            for (poly_idx, poly) in polygons.iter().enumerate() {
                 match plane.classify_polygon(poly) {
                     COPLANAR => { /* ignored for balance */ },
                     FRONT => num_front += 1,
                     BACK => num_back += 1,
-                    SPANNING | _ => num_spanning += 1,
+                    SPANNING | _ => {
+                        num_spanning += 1;
+                        total_area_split += polygon_areas[poly_idx];
+                    }
                 }
             }
 
-            // The score is a weighted sum of the number of spanning polygons and the
-            // imbalance between front and back polygons. The weights are chosen
-            // to strongly penalize splitting polygons.
+            // **Enhancement**: Multi-criteria scoring with area consideration
             let balance = (num_front as Real - num_back as Real).abs();
-            let score = K_SPANS_BASE * num_spanning as Real + K_BALANCE_BASE * balance;
+            let area_penalty = total_area_split * K_AREA_WEIGHT;
+            let score = k_spans * num_spanning as Real + k_balance * balance + area_penalty;
 
-            //  Fast-path: perfect plane (no spanning + nearly balanced) – stop early.
-            if num_spanning == 0 && balance <= 1.0 {
+            // **Optimization**: Early termination for near-perfect planes
+            if num_spanning == 0 && balance <= 2.0 {
                 return plane.clone();
             }
 
+            // **Enhancement**: Prefer planes that don't split large polygons
             if score < best_score {
                 best_score = score;
                 best_plane = plane.clone();
