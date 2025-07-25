@@ -655,8 +655,37 @@ impl<S: Clone + Send + Sync + Debug> CSG for Mesh<S> {
     ///          +-------+
     /// ```
     fn intersection(&self, other: &Mesh<S>) -> Mesh<S> {
-        let mut a = Node::from_polygons(&self.polygons);
-        let mut b = Node::from_polygons(&other.polygons);
+        // Fast paths -------------------------------------------------------
+        if self.polygons.is_empty() || other.polygons.is_empty() {
+            return Mesh::new(); // empty intersection
+        }
+
+        // Restrict work to polygons whose AABBs overlap the other mesh – this
+        // can dramatically cut BSP depth for large models with sparse
+        // overlap regions (common in TPMS → shell intersections).
+        let (a_clip, _a_passthru) =
+            Self::partition_polys(&self.polygons, &other.bounding_box());
+        let (b_clip, _b_passthru) =
+            Self::partition_polys(&other.polygons, &self.bounding_box());
+
+        // If bounding boxes do not overlap, early-out.
+        if a_clip.is_empty() || b_clip.is_empty() {
+            return Mesh::new();
+        }
+
+        // Retag B polygons to inherit A's metadata so downstream welds keep
+        // uniform metadata inside the intersection region.
+        let b_clip_retagged: Vec<Polygon<S>> = b_clip
+            .iter()
+            .map(|poly| {
+                let mut p = poly.clone();
+                p.metadata = self.metadata.clone();
+                p
+            })
+            .collect();
+
+        let mut a = Node::from_polygons(&a_clip);
+        let mut b = Node::from_polygons(&b_clip_retagged);
 
         a.invert();
         b.clip_to(&a);
