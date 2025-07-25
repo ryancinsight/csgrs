@@ -46,7 +46,7 @@ impl<S: Clone + Debug + Send + Sync> Mesh<S> {
         );
 
         let diag = max_pt.coords - min_pt.coords;
-        let res_minus_one = res_vec - Vector3::repeat(1.0 as Real);
+        let res_minus_one = res_vec - Vector3::repeat(1.0);
         let cell = diag.component_div(&res_minus_one);
 
         // One-cell padding each side
