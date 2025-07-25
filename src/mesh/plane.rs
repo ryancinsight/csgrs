@@ -421,7 +421,7 @@ impl Plane {
                                 continue;
                             }
                             // Clamp to the legal \[0,1\] range to absorb tiny numerical noise.
-                            intersection_param = intersection_param.max(0.0).min(1.0);
+intersection_param = intersection_param.clamp(0.0, 1.0);
 
                             let vertex_new = vertex_i.interpolate(vertex_j, intersection_param);
 
