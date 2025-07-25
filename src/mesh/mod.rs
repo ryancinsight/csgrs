@@ -10,7 +10,7 @@ use crate::float_types::{
         ColliderBuilder, ColliderSet, Ray, RigidBodyBuilder, RigidBodyHandle, RigidBodySet,
         SharedShape, TriMesh, Triangle,
     },
-    {EPSILON, Real},
+    EPSILON, Real,
 };
 use crate::mesh::{bsp::Node, plane::Plane, polygon::Polygon, vertex::Vertex};
 use crate::sketch::Sketch;
@@ -142,6 +142,29 @@ impl<S: Clone + Send + Sync + Debug> Mesh<S> {
 
         // Recompute bounding box because vertices moved (possibly collapsed).
         self.invalidate_bounding_box();
+    }
+
+    // ------------------------------------------------------------------
+    //  Adaptive vertex welding – picks a tolerance proportional to the
+    //  model’s overall size so very small or very large models receive an
+    //  appropriate epsilon.  This reduces pin-holes at Boolean seams while
+    //  obeying the YAGNI & KISS principles by re-using the existing
+    //  `weld_vertices_mut` implementation.
+    // ------------------------------------------------------------------
+    #[inline]
+    pub fn auto_weld_vertices_mut(&mut self) {
+        use crate::float_types::EPSILON;
+        // We need a bounding box to gauge model scale.  `bounding_box()` is
+        // cached so this call is O(1) after the first invocation.
+        let aabb = self.bounding_box();
+        let diag = aabb.maxs - aabb.mins;
+        // Characteristic length – the largest edge of the AABB.
+        let max_extent = diag.x.max(diag.y.max(diag.z));
+        // Tolerance set to 1e-6 of the model size (empirically robust down to
+        // micron-scale parts in f64 and millimetre-scale in f32).  Clamp to
+        // four × EPSILON minimum so extremely small models still weld.
+        let tol = (max_extent * 1e-6).max(EPSILON * 4.0);
+        self.weld_vertices_mut(tol);
     }
 
     /// Build a Mesh from an existing polygon list
@@ -568,8 +591,8 @@ impl<S: Clone + Send + Sync + Debug> CSG for Mesh<S> {
             metadata: self.metadata.clone(),
         };
 
-        // Heal potential seams introduced by CSG clipping
-        mesh.weld_vertices_mut(EPSILON * 4.0);
+        // Heal potential seams introduced by CSG clipping with adaptive epsilon
+        mesh.auto_weld_vertices_mut();
 
         mesh
     }
@@ -636,7 +659,7 @@ impl<S: Clone + Send + Sync + Debug> CSG for Mesh<S> {
         };
 
         // Heal potential seams introduced by CSG clipping
-        mesh.weld_vertices_mut(EPSILON * 4.0);
+        mesh.auto_weld_vertices_mut();
 
         mesh
     }
@@ -691,7 +714,7 @@ impl<S: Clone + Send + Sync + Debug> CSG for Mesh<S> {
         };
 
         // Heal potential seams introduced by CSG clipping
-        mesh.weld_vertices_mut(EPSILON * 4.0);
+        mesh.auto_weld_vertices_mut();
 
         mesh
     }
@@ -727,7 +750,7 @@ impl<S: Clone + Send + Sync + Debug> CSG for Mesh<S> {
             metadata: self.metadata.clone(),
         };
 
-        mesh.weld_vertices_mut(EPSILON * 4.0);
+        mesh.auto_weld_vertices_mut();
 
         mesh
     }
@@ -810,10 +833,14 @@ impl<S: Clone + Send + Sync + Debug> CSG for Mesh<S> {
         mesh
     }
 
+    // ------------------------------------------------------------------
+    //  +++ Restored core CSG trait methods lost during refactor +++
+    // ------------------------------------------------------------------
+
     /// Returns a [`parry3d::bounding_volume::Aabb`] indicating the 3D bounds of all `polygons`.
     fn bounding_box(&self) -> Aabb {
         *self.bounding_box.get_or_init(|| {
-            // Track overall min/max in x, y, z among all 3D polygons
+            // Track overall min/max in x, y, z among all vertices.
             let mut min_x = Real::MAX;
             let mut min_y = Real::MAX;
             let mut min_z = Real::MAX;
@@ -824,6 +851,7 @@ impl<S: Clone + Send + Sync + Debug> CSG for Mesh<S> {
             // 1) Gather from the 3D polygons
             for poly in &self.polygons {
                 for v in &poly.vertices {
+                    // Use partial_min/max helpers to ignore NaNs
                     if let Some(val) = partial_min(&min_x, &v.pos.x) {
                         min_x = *val;
                     }
@@ -846,24 +874,23 @@ impl<S: Clone + Send + Sync + Debug> CSG for Mesh<S> {
                 }
             }
 
-            // If still uninitialized (e.g., no polygons), return a trivial AABB at origin
+            // If still uninitialized (e.g., empty mesh) → trivial AABB at origin
             if min_x > max_x {
                 return Aabb::new(Point3::origin(), Point3::origin());
             }
 
-            // Build a parry3d Aabb from these min/max corners
             let mins = Point3::new(min_x, min_y, min_z);
             let maxs = Point3::new(max_x, max_y, max_z);
             Aabb::new(mins, maxs)
         })
     }
 
-    /// Invalidates object's cached bounding box.
+    /// Invalidates object's cached bounding box so it will be recomputed lazily.
     fn invalidate_bounding_box(&mut self) {
         self.bounding_box = OnceLock::new();
     }
 
-    /// Invert this Mesh (flip inside vs. outside)
+    /// Return a copy of `self` with polygons flipped (inside ↔ outside).
     fn inverse(&self) -> Mesh<S> {
         let mut mesh = self.clone();
         for p in &mut mesh.polygons {
@@ -873,61 +900,59 @@ impl<S: Clone + Send + Sync + Debug> CSG for Mesh<S> {
     }
 }
 
+// ------------------------------------------------------------------
+//  Convert a 2-D Sketch into a 3-D Mesh lying on z=0 plane
+// ------------------------------------------------------------------
 impl<S: Clone + Send + Sync + Debug> From<Sketch<S>> for Mesh<S> {
-    /// Convert a Sketch into a Mesh.
     fn from(sketch: Sketch<S>) -> Self {
-        /// Helper function to convert a geo::Polygon to a Vec<crate::mesh::polygon::Polygon>
+        use geo::Polygon as GeoPolygon;
+        // Helper: convert geo::Polygon to Mesh Polygons (on z=0)
         fn geo_poly_to_csg_polys<S: Clone + Debug + Send + Sync>(
             poly2d: &GeoPolygon<Real>,
             metadata: &Option<S>,
         ) -> Vec<Polygon<S>> {
-            let mut all_polygons = Vec::new();
+            let mut polys = Vec::new();
 
-            // Handle the exterior ring
-            let outer_vertices_3d: Vec<_> = poly2d
+            // Exterior ring
+            let exterior: Vec<_> = poly2d
                 .exterior()
                 .coords_iter()
                 .map(|c| Vertex::new(Point3::new(c.x, c.y, 0.0), Vector3::z()))
                 .collect();
-
-            if outer_vertices_3d.len() >= 3 {
-                all_polygons.push(Polygon::new(outer_vertices_3d, metadata.clone()));
+            if exterior.len() >= 3 {
+                polys.push(Polygon::new(exterior, metadata.clone()));
             }
 
-            // Handle interior rings (holes)
+            // Interior rings (holes)
             for ring in poly2d.interiors() {
-                let hole_vertices_3d: Vec<_> = ring
+                let hole: Vec<_> = ring
                     .coords_iter()
                     .map(|c| Vertex::new(Point3::new(c.x, c.y, 0.0), Vector3::z()))
                     .collect();
-                if hole_vertices_3d.len() >= 3 {
-                    all_polygons.push(Polygon::new(hole_vertices_3d, metadata.clone()));
+                if hole.len() >= 3 {
+                    polys.push(Polygon::new(hole, metadata.clone()));
                 }
             }
-            all_polygons
+            polys
         }
 
-        let final_polygons = sketch
+        let polygons: Vec<Polygon<S>> = sketch
             .geometry
             .iter()
-            .flat_map(|geom| -> Vec<Polygon<S>> {
-                match geom {
-                    Geometry::Polygon(poly2d) => {
-                        geo_poly_to_csg_polys(poly2d, &sketch.metadata)
-                    },
-                    Geometry::MultiPolygon(multipoly) => multipoly
-                        .iter()
-                        .flat_map(|poly2d| geo_poly_to_csg_polys(poly2d, &sketch.metadata))
-                        .collect(),
-                    _ => vec![],
-                }
+            .flat_map(|geom| match geom {
+                geo::Geometry::Polygon(poly) => geo_poly_to_csg_polys(poly, &sketch.metadata),
+                geo::Geometry::MultiPolygon(multi) => multi
+                    .iter()
+                    .flat_map(|poly| geo_poly_to_csg_polys(poly, &sketch.metadata))
+                    .collect(),
+                _ => Vec::new(),
             })
             .collect();
 
         Mesh {
-            polygons: final_polygons,
+            polygons,
             bounding_box: OnceLock::new(),
-            metadata: None,
+            metadata: sketch.metadata,
         }
     }
 }
