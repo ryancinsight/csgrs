@@ -396,11 +396,43 @@ impl Plane {
                         let denom = normal.dot(&(vertex_j.pos - vertex_i.pos));
                         // Avoid dividing by zero
                         if denom.abs() > EPSILON {
-                            let intersection =
+                            let mut intersection_param =
                                 (self.offset() - normal.dot(&vertex_i.pos.coords)) / denom;
-                            let vertex_new = vertex_i.interpolate(vertex_j, intersection);
-                            split_front.push(vertex_new.clone());
-                            split_back.push(vertex_new);
+                            // -----------------------------------------------------------------
+                            // 🛡️  Numerical Robustness Guard
+                            // -----------------------------------------------------------------
+                            // Due to floating-point imprecision `intersection_param` can fall
+                            // marginally outside the \[0,1\] segment interval which represents
+                            // the edge   *vi → vj*.
+                            // Outside values would either duplicate an existing endpoint (≈0
+                            // or ≈1) or create a point outside the actual edge, ultimately
+                            // producing tiny sliver polygons that later get discarded and form
+                            // holes in highly-tessellated surfaces (observed on gyroid &
+                            // Schwarz-*TPMS* meshes).
+                            //
+                            // Instead of *blindly* generating such vertices we clamp the
+                            // interval and treat near-endpoint cases as exactly the endpoint.
+                            // This follows the **ACID** principle (specifically C – Consistency)
+                            // by guaranteeing that every intersection lies on the edge.
+                            // -----------------------------------------------------------------
+                            if intersection_param < -EPSILON || intersection_param > 1.0 + EPSILON {
+                                // Intersection lies clearly outside the edge – ignore to avoid
+                                // creating degenerate geometry.
+                                continue;
+                            }
+                            // Clamp to the legal \[0,1\] range to absorb tiny numerical noise.
+                            intersection_param = intersection_param.max(0.0).min(1.0);
+
+                            let vertex_new = vertex_i.interpolate(vertex_j, intersection_param);
+
+                            // Avoid duplicating vertices if the newly generated one coincides
+                            // with the last pushed vertex (DRY & performance).
+                            if split_front.last().map_or(true, |v| v.pos != vertex_new.pos) {
+                                split_front.push(vertex_new.clone());
+                            }
+                            if split_back.last().map_or(true, |v| v.pos != vertex_new.pos) {
+                                split_back.push(vertex_new);
+                            }
                         }
                     }
                 }

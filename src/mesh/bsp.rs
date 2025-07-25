@@ -81,8 +81,9 @@ impl<S: Clone + Send + Sync + Debug> Node<S> {
         let mut best_plane = polygons[0].plane.clone();
         let mut best_score = Real::MAX;
 
-        // Sample a subset of polygons (up to 20) as candidate planes
-        let sample_size = polygons.len().min(20);
+        // Sample a subset of polygons (≈√n, capped) as candidate planes.  This improves
+        // the quality of the heuristic without incurring O(n²) cost on large meshes.
+        let sample_size = ((polygons.len() as f64).sqrt() as usize).max(1).min(64);
         for p in polygons.iter().take(sample_size) {
             let plane = &p.plane;
             let mut num_front = 0;
@@ -296,31 +297,33 @@ impl<S: Clone + Send + Sync + Debug> Node<S> {
                         })
                         .collect();
 
-                    // Pair up crossing points into edges while preserving order.
-                    // According to Jordan curve theorem a planar slice must create an
-                    // even number of intersection vertices per polygon (0 or 2*️⃣n).
-                    // Nevertheless, in the presence of numerical noise we may get an
-                    // odd number.  We therefore build edges iteratively and keep the
-                    // last unmatched vertex around.  This guarantees we never panic or
-                    // silently drop a point.
+                    // -----------------------------------------------------------------
+                    //  🔄  Robust Edge Pairing
+                    // -----------------------------------------------------------------
+                    // A well-behaved convex polygon must intersect a plane an **even**
+                    // number of times (Jordan curve theorem).  With floating-point
+                    // arithmetic we occasionally collect an **odd** number.  Instead of
+                    // creating a hole (by discarding the orphan) we connect the last
+                    // intersection back to the first, ensuring topological consistency
+                    // while keeping the operation branch-free and cache-friendly.
 
-                    let mut pending: Option<Vertex> = None;
-                    for cp in crossing_points {
-                        if let Some(first) = pending.take() {
-                            intersection_edges.push([first, cp]);
-                        } else {
-                            pending = Some(cp);
-                        }
+                    let cp_count = crossing_points.len();
+                    for chunk in crossing_points.chunks_exact(2) {
+                        intersection_edges.push([chunk[0].clone(), chunk[1].clone()]);
                     }
 
-                    // If one vertex is still pending we are in an inconsistent state
-                    // (odd number of crossings).  Instead of discarding it, we log a
-                    // debug message so the caller can diagnose geometric problems.
-                    if let Some(orphan) = pending {
+                    if cp_count % 2 == 1 && cp_count >= 3 {
+                        // Connect last to first to close the loop.
+                        intersection_edges.push([
+                            crossing_points[cp_count - 1].clone(),
+                            crossing_points[0].clone(),
+                        ]);
+                    } else if cp_count % 2 == 1 {
+                        // Rare degenerate: exactly one intersection -> skip but warn.
                         #[cfg(debug_assertions)]
                         eprintln!(
-                            "[csgrs::bsp] Warning: odd number of slice intersections (orphan at {:?})",
-                            orphan.pos
+                            "[csgrs::bsp] Warning: single (unpaired) slice intersection at {:?}",
+                            crossing_points[0].pos
                         );
                     }
                 },
