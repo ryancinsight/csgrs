@@ -107,14 +107,11 @@ impl<S: Clone + Send + Sync + Debug> Node<S> {
                 }
             }
 
-            //  Adaptive weights: penalise spanning proportionally to how many
-            //  polygons we have to start with so larger meshes don't drown the
-            //  balance term.
-            let k_spans = K_SPANS_BASE;
-            let k_balance = K_BALANCE_BASE;
-
+            // The score is a weighted sum of the number of spanning polygons and the
+            // imbalance between front and back polygons. The weights are chosen
+            // to strongly penalize splitting polygons.
             let balance = (num_front as Real - num_back as Real).abs();
-            let score = k_spans * num_spanning as Real + k_balance * balance;
+            let score = K_SPANS_BASE * num_spanning as Real + K_BALANCE_BASE * balance;
 
             //  Fast-path: perfect plane (no spanning + nearly balanced) – stop early.
             if num_spanning == 0 && balance <= 1.0 {
