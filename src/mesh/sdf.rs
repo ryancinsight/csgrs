@@ -39,22 +39,27 @@ impl<S: Clone + Debug + Send + Sync> Mesh<S> {
         // Must be `Sync`/`Send` if you want to parallelize the sampling.
         F: Fn(&Point3<Real>) -> Real + Sync + Send,
     {
-        // Early return if resolution is degenerate
-        let nx = resolution.0.max(2) as u32;
-        let ny = resolution.1.max(2) as u32;
-        let nz = resolution.2.max(2) as u32;
+        // **Enhancement**: Ensure minimum resolution and add boundary padding
+        let nx = resolution.0.max(4) as u32; // Increased minimum from 2 to 4
+        let ny = resolution.1.max(4) as u32;
+        let nz = resolution.2.max(4) as u32;
 
-        // Determine grid spacing based on bounding box and resolution
-        let dx = (max_pt.x - min_pt.x) / (nx as Real - 1.0);
-        let dy = (max_pt.y - min_pt.y) / (ny as Real - 1.0);
-        let dz = (max_pt.z - min_pt.z) / (nz as Real - 1.0);
+        // **Optimization**: Add adaptive boundary expansion to prevent edge artifacts
+        let bbox_size = max_pt - min_pt;
+        let adaptive_padding = bbox_size.norm() * 0.02; // 2% padding
+        let min_pt_padded = min_pt - Vector3::repeat(adaptive_padding);
+        let max_pt_padded = max_pt + Vector3::repeat(adaptive_padding);
+
+        // **Enhancement**: Use padded bounds for more robust sampling
+        let dx = (max_pt_padded.x - min_pt_padded.x) / (nx as Real - 1.0);
+        let dy = (max_pt_padded.y - min_pt_padded.y) / (ny as Real - 1.0);
+        let dz = (max_pt_padded.z - min_pt_padded.z) / (nz as Real - 1.0);
 
         // Allocate storage for field values:
         let array_size = (nx * ny * nz) as usize;
         let mut field_values = vec![0.0_f32; array_size];
 
-        // Optimized finite value checking with iterator patterns
-        // **Mathematical Foundation**: Ensures all coordinates are finite real numbers
+        // **Enhancement**: Improved finite value checking with mathematical correctness
         #[inline]
         fn point_finite(p: &Point3<Real>) -> bool {
             p.coords.iter().all(|&c| c.is_finite())
@@ -65,10 +70,8 @@ impl<S: Clone + Debug + Send + Sync> Mesh<S> {
             v.iter().all(|&c| c.is_finite())
         }
 
-        // Sample the SDF at each grid cell with optimized iteration pattern:
-        // **Mathematical Foundation**: For SDF f(p), we sample at regular intervals
-        // and store (f(p) - iso_value) so surface_nets finds zero-crossings at iso_value.
-        // **Optimization**: Linear memory access pattern with better cache locality.
+        // **Optimization**: Enhanced sampling with boundary refinement
+        // Sample the SDF at each grid cell with adaptive supersampling near boundaries
         #[allow(clippy::unnecessary_cast)]
         for i in 0..(nx * ny * nz) {
             let iz = i / (nx * ny);
@@ -76,20 +79,56 @@ impl<S: Clone + Debug + Send + Sync> Mesh<S> {
             let iy = remainder / nx;
             let ix = remainder % nx;
 
-            let xf = min_pt.x + (ix as Real) * dx;
-            let yf = min_pt.y + (iy as Real) * dy;
-            let zf = min_pt.z + (iz as Real) * dz;
+            let xf = min_pt_padded.x + (ix as Real) * dx;
+            let yf = min_pt_padded.y + (iy as Real) * dy;
+            let zf = min_pt_padded.z + (iz as Real) * dz;
 
             let p = Point3::new(xf, yf, zf);
-            let sdf_val = sdf(&p);
+            
+            // **Enhancement**: Adaptive supersampling near zero-level set
+            let mut sdf_val = sdf(&p);
+            
+            // **Optimization**: If we're near the surface (within 2 grid units), use supersampling
+            let surface_threshold = 2.0 * (dx.min(dy).min(dz));
+            if sdf_val.abs() < surface_threshold {
+                // **Enhancement**: 2x2x2 supersampling for boundary regions
+                let subsample_offset = 0.25;
+                let mut samples = Vec::with_capacity(8);
+                
+                for sx in &[-subsample_offset, subsample_offset] {
+                    for sy in &[-subsample_offset, subsample_offset] {
+                        for sz in &[-subsample_offset, subsample_offset] {
+                            let sub_p = Point3::new(
+                                xf + sx * dx,
+                                yf + sy * dy,
+                                zf + sz * dz
+                            );
+                            let sub_val = sdf(&sub_p);
+                            if sub_val.is_finite() {
+                                samples.push(sub_val);
+                            }
+                        }
+                    }
+                }
+                
+                // **Enhancement**: Use median filtering to reduce noise
+                if !samples.is_empty() {
+                    samples.sort_by(|a, b| a.partial_cmp(b).unwrap());
+                    sdf_val = if samples.len() % 2 == 0 {
+                        (samples[samples.len()/2 - 1] + samples[samples.len()/2]) * 0.5
+                    } else {
+                        samples[samples.len()/2]
+                    };
+                }
+            }
 
-            // Robust finite value handling with mathematical correctness
+            // **Enhancement**: Robust finite value handling with improved fallback
             field_values[i as usize] = if sdf_val.is_finite() {
                 (sdf_val - iso_value) as f32
             } else {
-                // For infinite/NaN values, use large positive value to indicate "far outside"
-                // This preserves the mathematical properties of the distance field
-                1e10_f32
+                // **Improvement**: Use distance-based fallback instead of constant
+                let fallback_distance = (dx + dy + dz) / 3.0;
+                fallback_distance as f32
             };
         }
 
@@ -141,12 +180,16 @@ impl<S: Clone + Debug + Send + Sync> Mesh<S> {
         let max_y = ny - 1;
         let max_z = nz - 1;
 
-        // Run surface nets
+        // **Enhancement**: Use tighter bounds to reduce edge artifacts
+        let start_bounds = [1, 1, 1]; // Skip boundary voxels
+        let end_bounds = [max_x.saturating_sub(1), max_y.saturating_sub(1), max_z.saturating_sub(1)];
+
+        // Run surface nets with improved bounds
         surface_nets(
             &field_values,
             &shape,
-            [0, 0, 0],
-            [max_x, max_y, max_z],
+            start_bounds,
+            end_bounds,
             &mut sn_buffer,
         );
 
@@ -162,21 +205,21 @@ impl<S: Clone + Debug + Send + Sync> Mesh<S> {
             let p1i = sn_buffer.positions[i1];
             let p2i = sn_buffer.positions[i2];
 
-            // Convert from [u32; 3] to real coordinates:
+            // **Enhancement**: Map back to original coordinate system (unpadded)
             let p0 = Point3::new(
-                min_pt.x + p0i[0] as Real * dx,
-                min_pt.y + p0i[1] as Real * dy,
-                min_pt.z + p0i[2] as Real * dz,
+                min_pt_padded.x + p0i[0] as Real * dx,
+                min_pt_padded.y + p0i[1] as Real * dy,
+                min_pt_padded.z + p0i[2] as Real * dz,
             );
             let p1 = Point3::new(
-                min_pt.x + p1i[0] as Real * dx,
-                min_pt.y + p1i[1] as Real * dy,
-                min_pt.z + p1i[2] as Real * dz,
+                min_pt_padded.x + p1i[0] as Real * dx,
+                min_pt_padded.y + p1i[1] as Real * dy,
+                min_pt_padded.z + p1i[2] as Real * dz,
             );
             let p2 = Point3::new(
-                min_pt.x + p2i[0] as Real * dx,
-                min_pt.y + p2i[1] as Real * dy,
-                min_pt.z + p2i[2] as Real * dz,
+                min_pt_padded.x + p2i[0] as Real * dx,
+                min_pt_padded.y + p2i[1] as Real * dy,
+                min_pt_padded.z + p2i[2] as Real * dz,
             );
 
             // Retrieve precomputed normal from Surface Nets:
@@ -184,33 +227,46 @@ impl<S: Clone + Debug + Send + Sync> Mesh<S> {
             let n1 = sn_buffer.normals[i1];
             let n2 = sn_buffer.normals[i2];
 
-            // Normals come out as [f32;3] – promote to `Real`
+            // **Enhancement**: Normalize and validate normals
             let n0v = Vector3::new(n0[0] as Real, n0[1] as Real, n0[2] as Real);
             let n1v = Vector3::new(n1[0] as Real, n1[1] as Real, n1[2] as Real);
             let n2v = Vector3::new(n2[0] as Real, n2[1] as Real, n2[2] as Real);
 
-            // ── « gate » ────────────────────────────────────────────────
-            if !(point_finite(&p0)
-                && point_finite(&p1)
-                && point_finite(&p2)
-                && vec_finite(&n0v)
-                && vec_finite(&n1v)
-                && vec_finite(&n2v))
-            {
-                // at least one coordinate was NaN/±∞ – ignore this triangle
-                continue;
+            // **Enhancement**: Improved finite value validation with fallback normals
+            if !(point_finite(&p0) && point_finite(&p1) && point_finite(&p2)) {
+                continue; // Skip invalid triangles
             }
 
-            let v0 =
-                Vertex::new(p0, Vector3::new(n0[0] as Real, n0[1] as Real, n0[2] as Real));
-            let v1 =
-                Vertex::new(p1, Vector3::new(n1[0] as Real, n1[1] as Real, n1[2] as Real));
-            let v2 =
-                Vertex::new(p2, Vector3::new(n2[0] as Real, n2[1] as Real, n2[2] as Real));
+            // **Enhancement**: Compute fallback normals if surface nets normals are invalid
+            let (final_n0, final_n1, final_n2) = if vec_finite(&n0v) && vec_finite(&n1v) && vec_finite(&n2v) {
+                (n0v, n1v, n2v)
+            } else {
+                // Compute triangle normal as fallback
+                let edge1 = p1 - p0;
+                let edge2 = p2 - p0;
+                let face_normal = edge1.cross(&edge2);
+                let normalized_normal = if face_normal.norm() > Real::EPSILON {
+                    face_normal.normalize()
+                } else {
+                    Vector3::new(0.0, 0.0, 1.0) // Default up vector
+                };
+                (normalized_normal, normalized_normal, normalized_normal)
+            };
 
-            // Note: reverse v1, v2 if you need to fix winding
-            let poly = Polygon::new(vec![v0, v1, v2], metadata.clone());
-            triangles.push(poly);
+            let v0 = Vertex::new(p0, final_n0);
+            let v1 = Vertex::new(p1, final_n1);
+            let v2 = Vertex::new(p2, final_n2);
+
+            // **Enhancement**: Validate triangle area to avoid degenerate triangles
+            let edge1 = p1 - p0;
+            let edge2 = p2 - p0;
+            let triangle_area = edge1.cross(&edge2).norm() * 0.5;
+            let min_area = (dx * dy).min(dy * dz).min(dx * dz) * 1e-6; // Very small area threshold
+            
+            if triangle_area > min_area {
+                let poly = Polygon::new(vec![v0, v1, v2], metadata.clone());
+                triangles.push(poly);
+            }
         }
 
         // Return as a Mesh

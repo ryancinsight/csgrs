@@ -34,37 +34,137 @@ impl<S: Clone + Debug + Send + Sync> Mesh<S> {
         let mut max_pt = aabb.maxs;
 
         // ------------------------------------------------------------------
-        //  Pad the AABB by **one voxel** on each side to guarantee that the
-        //  implicit surface is fully sampled at the solid boundary.  Without
-        //  this, aliasing can leave pin-holes where the TPMS meets the
-        //  bounding sphere (or any other host geometry).
+        //  **Enhancement**: Improved padding strategy for hole prevention
+        //  Pad the AABB by **multiple voxels** and use adaptive padding
+        //  based on the expected TPMS feature size to guarantee proper
+        //  sampling at boundaries and prevent aliasing artifacts.
         // ------------------------------------------------------------------
         let res_vec = Vector3::new(
-            resolution.0.max(2) as Real,
-            resolution.1.max(2) as Real,
-            resolution.2.max(2) as Real,
+            resolution.0.max(8) as Real, // Increased minimum resolution
+            resolution.1.max(8) as Real,
+            resolution.2.max(8) as Real,
         );
 
         let diag = max_pt.coords - min_pt.coords;
         let res_minus_one = res_vec - Vector3::repeat(1.0);
         let cell = diag.component_div(&res_minus_one);
 
-        // One-cell padding each side
-        min_pt = min_pt - cell;
-        max_pt = max_pt + cell;
+        // **Enhancement**: Multi-level padding strategy
+        // 1. Base padding: 2 cells per side (was 1)
+        // 2. Adaptive padding: Additional padding based on bounding box size
+        let base_padding = cell * 2.0;
+        let adaptive_padding = diag * 0.05; // 5% of bounding box
+        let total_padding = base_padding + adaptive_padding;
+
+        min_pt = min_pt - total_padding;
+        max_pt = max_pt + total_padding;
+
+        // **Enhancement**: Ensure the expanded bounding box has adequate resolution
+        let expanded_diag = max_pt.coords - min_pt.coords;
+        let min_feature_size = expanded_diag.min(); // Smallest dimension
+        let recommended_resolution = (min_feature_size / cell.min() * 2.0) as usize;
+        
+        let enhanced_resolution = (
+            resolution.0.max(recommended_resolution),
+            resolution.1.max(recommended_resolution), 
+            resolution.2.max(recommended_resolution)
+        );
+
         // Mesh the implicit surface with the generic surface‑nets backend
-        let surf = Mesh::sdf(sdf_fn, resolution, min_pt, max_pt, iso_value, metadata);
-        // Clip the infinite TPMS down to the original shape's volume
+        let surf = Mesh::sdf(sdf_fn, enhanced_resolution, min_pt, max_pt, iso_value, metadata);
+        
+        // **Enhancement**: Multi-stage clipping for better boundary handling
+        // Stage 1: Clip the infinite TPMS down to the original shape's volume
         let mut clipped = surf.intersection(self);
 
+        // **Enhancement**: Additional boundary smoothing stage
+        // Stage 2: Apply boundary-aware smoothing to reduce artifacts
+        let bbox_center = (aabb.mins + aabb.maxs.coords) * 0.5;
+        let bbox_radius = (aabb.maxs.coords - aabb.mins.coords).norm() * 0.5;
+        
+        // Apply distance-based smoothing near boundaries
+        for polygon in &mut clipped.polygons {
+            for vertex in &mut polygon.vertices {
+                let dist_from_center = (vertex.pos - bbox_center).norm();
+                let proximity_to_boundary = (dist_from_center / bbox_radius).min(1.0);
+                
+                // **Enhancement**: Smooth normals near boundaries to reduce artifacts
+                if proximity_to_boundary > 0.8 {
+                    // Blend with radial normal for smoother boundary transitions
+                    let radial_normal = (vertex.pos - bbox_center).normalize();
+                    let blend_factor = (proximity_to_boundary - 0.8) / 0.2; // Linear ramp from 0.8 to 1.0
+                    vertex.normal = vertex.normal.lerp(&radial_normal, blend_factor * 0.3);
+                    vertex.normal = vertex.normal.normalize();
+                }
+            }
+        }
+
         // ------------------------------------------------------------------
-        //  Final integrity pass – vertex welding
+        //  **Enhancement**: Advanced vertex welding with multi-scale tolerance
         // ------------------------------------------------------------------
-        //  Use a tolerance proportional to the sampling cell size.  This
-        //  scales naturally with user-supplied resolution and prevents both
-        //  under- and over-welding on very small or very large models.
-        let weld_tol = cell.x.min(cell.y.min(cell.z)); // smallest cell edge
-        clipped.weld_vertices_mut(weld_tol.max(crate::float_types::EPSILON * 4.0));
+        //  Use a progressive welding strategy: start with fine tolerance
+        //  for interior details, then use coarser tolerance for boundary
+        //  regions to ensure connectivity without losing detail.
+        
+        // Stage 1: Fine welding for interior features
+        let fine_weld_tol = cell.x.min(cell.y.min(cell.z)) * 0.25;
+        clipped.weld_vertices_mut(fine_weld_tol.max(crate::float_types::EPSILON * 2.0));
+        
+        // Stage 2: Boundary-aware coarse welding
+        let coarse_weld_tol = cell.x.min(cell.y.min(cell.z)) * 0.5;
+        
+        // **Enhancement**: Apply selective welding based on distance from boundary
+        // Create a custom welding function that uses different tolerances
+        // based on vertex proximity to the original bounding volume
+        {
+            use hashbrown::HashMap;
+            use crate::mesh::plane::Plane;
+            
+            if !clipped.polygons.is_empty() {
+                let boundary_weld_tol = coarse_weld_tol.max(crate::float_types::EPSILON * 4.0);
+                
+                // Adaptive tolerance based on distance from boundary
+                fn adaptive_tolerance(pos: &Point3<Real>, center: &Point3<Real>, radius: Real, 
+                                    fine_tol: Real, coarse_tol: Real) -> Real {
+                    let dist_from_center = (pos - center).norm();
+                    let proximity = (dist_from_center / radius).min(1.0);
+                    
+                    if proximity > 0.9 {
+                        coarse_tol // Near boundary, use coarse tolerance
+                    } else {
+                        fine_tol // Interior, use fine tolerance
+                    }
+                }
+                
+                let mut vmap: HashMap<(i64, i64, i64), (crate::mesh::vertex::Vertex, Real)> = HashMap::new();
+                
+                for poly in &mut clipped.polygons {
+                    for v in &mut poly.vertices {
+                        let adaptive_tol = adaptive_tolerance(&v.pos, &bbox_center, bbox_radius, 
+                                                            fine_weld_tol, boundary_weld_tol);
+                        let cell_size = adaptive_tol;
+                        let inv = 1.0 / cell_size;
+                        let k = (
+                            (v.pos.x * inv).round() as i64,
+                            (v.pos.y * inv).round() as i64,
+                            (v.pos.z * inv).round() as i64,
+                        );
+                        
+                        if let Some((canon, _)) = vmap.get(&k) {
+                            *v = canon.clone();
+                        } else {
+                            vmap.insert(k, (v.clone(), adaptive_tol));
+                        }
+                    }
+                    
+                    // Recompute plane from (potentially modified) vertices
+                    poly.plane = Plane::from_vertices(poly.vertices.clone());
+                    poly.bounding_box = std::sync::OnceLock::new();
+                }
+                
+                clipped.invalidate_bounding_box();
+            }
+        }
 
         clipped
     }
