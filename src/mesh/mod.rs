@@ -552,11 +552,16 @@ impl<S: Clone + Send + Sync + Debug> CSG for Mesh<S> {
         final_polys.extend(a_passthru);
         final_polys.extend(b_passthru);
 
-        Mesh {
+        let mut mesh = Mesh {
             polygons: final_polys,
             bounding_box: OnceLock::new(),
             metadata: self.metadata.clone(),
-        }
+        };
+
+        // Heal potential seams introduced by CSG clipping
+        mesh.weld_vertices_mut(EPSILON * 4.0);
+
+        mesh
     }
 
     /// Return a new Mesh representing diffarence of the two Meshes.
@@ -614,11 +619,16 @@ impl<S: Clone + Send + Sync + Debug> CSG for Mesh<S> {
         let mut final_polys = a.all_polygons();
         final_polys.extend(a_passthru);
 
-        Mesh {
+        let mut mesh = Mesh {
             polygons: final_polys,
             bounding_box: OnceLock::new(),
             metadata: self.metadata.clone(),
-        }
+        };
+
+        // Heal potential seams introduced by CSG clipping
+        mesh.weld_vertices_mut(EPSILON * 4.0);
+
+        mesh
     }
 
     /// Return a new CSG representing intersection of the two CSG's.
@@ -646,11 +656,16 @@ impl<S: Clone + Send + Sync + Debug> CSG for Mesh<S> {
         a.build(&b.all_polygons());
         a.invert();
 
-        Mesh {
+        let mut mesh = Mesh {
             polygons: a.all_polygons(),
             bounding_box: OnceLock::new(),
             metadata: self.metadata.clone(),
-        }
+        };
+
+        // Heal potential seams introduced by CSG clipping
+        mesh.weld_vertices_mut(EPSILON * 4.0);
+
+        mesh
     }
 
     /// Return a new CSG representing space in this CSG excluding the space in the
@@ -676,7 +691,17 @@ impl<S: Clone + Send + Sync + Debug> CSG for Mesh<S> {
         let b_sub_a = other.difference(self);
 
         // Union those two
-        a_sub_b.union(&b_sub_a)
+        let final_polys = a_sub_b.union(&b_sub_a).polygons;
+
+        let mut mesh = Mesh {
+            polygons: final_polys,
+            bounding_box: OnceLock::new(),
+            metadata: self.metadata.clone(),
+        };
+
+        mesh.weld_vertices_mut(EPSILON * 4.0);
+
+        mesh
     }
 
     /// **Mathematical Foundation: General 3D Transformations**
