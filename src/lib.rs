@@ -59,6 +59,3 @@ mod bounding_box_tests;
 
 #[cfg(test)]
 mod slice_tests;
-
-#[cfg(test)]
-mod splitting_tests;

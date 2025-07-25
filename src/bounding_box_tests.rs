@@ -3,13 +3,12 @@
 /// These tests focus on robustness: the algorithms should tolerate `NaN` inputs without panicking
 /// and must return a finite, well-ordered axis-aligned bounding box.
 
-#![cfg(test)]
-
 use nalgebra::{Point3, Vector3};
 
 use crate::mesh::Mesh;
 use crate::mesh::polygon::Polygon;
 use crate::mesh::vertex::Vertex;
+use crate::traits::CSG;
 use crate::float_types::Real;
 
 #[test]

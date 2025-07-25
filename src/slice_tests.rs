@@ -1,7 +1,5 @@
 /// Tests for BSP slicing robustness
 
-#![cfg(test)]
-
 use crate::mesh::bsp::Node;
 use crate::mesh::polygon::Polygon;
 use crate::mesh::plane::Plane;

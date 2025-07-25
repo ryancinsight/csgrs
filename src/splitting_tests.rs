@@ -1,7 +1,5 @@
 /// Tests for improved splitting plane heuristic
 
-#![cfg(test)]
-
 use crate::mesh::bsp::Node;
 use crate::mesh::polygon::Polygon;
 use crate::mesh::vertex::Vertex;

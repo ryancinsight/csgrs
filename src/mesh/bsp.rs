@@ -75,70 +75,23 @@ impl<S: Clone + Send + Sync + Debug> Node<S> {
     }
 
     pub fn pick_best_splitting_plane(&self, polygons: &[Polygon<S>]) -> Plane {
-        use nalgebra::Point3;
-
         const K_SPANS: Real = 8.0; // Weight for spanning polygons
         const K_BALANCE: Real = 1.0; // Weight for front/back balance
 
-        // ------------------------------------------------------------------
-        // 1) Candidate planes from bounding-box median along principal axes.
-        // ------------------------------------------------------------------
-        let mut candidates: Vec<Plane> = Vec::with_capacity(6 + 20);
-
-        // Compute centroids once – O(n·m)  (m = average verts per poly)
-        let centroids: Vec<Point3<Real>> = polygons
-            .iter()
-            .map(|poly| {
-                let (sum_vec, count) = poly
-                    .vertices
-                    .iter()
-                    .fold((nalgebra::Vector3::<Real>::zeros(), 0usize), |acc, v| {
-                        (acc.0 + v.pos.coords, acc.1 + 1)
-                    });
-                if count == 0 {
-                    Point3::origin()
-                } else {
-                    Point3::from(sum_vec / (count as Real))
-                }
-            })
-            .collect();
-
-        // Determine medians per axis
-        for axis in 0..3 {
-            let mut coords: Vec<Real> = centroids.iter().map(|c| c[axis]).collect();
-            coords.sort_by(|a, b| a.total_cmp(b));
-            if coords.is_empty() {
-                continue;
-            }
-            let median = coords[coords.len() / 2];
-            let normal = match axis {
-                0 => nalgebra::Vector3::x(),
-                1 => nalgebra::Vector3::y(),
-                _ => nalgebra::Vector3::z(),
-            };
-            candidates.push(Plane::from_normal(normal, median));
-        }
-
-        // ------------------------------------------------------------------
-        // 2) Add up to 20 planes coming from input polygons (legacy heuristic)
-        // ------------------------------------------------------------------
-        let sample_size = polygons.len().min(20);
-        candidates.extend(polygons.iter().take(sample_size).map(|p| p.plane.clone()));
-
-        // ------------------------------------------------------------------
-        // 3) Evaluate all candidates with cost function
-        // ------------------------------------------------------------------
-        let mut best_plane = candidates[0].clone();
+        let mut best_plane = polygons[0].plane.clone();
         let mut best_score = Real::MAX;
 
-        for plane in &candidates {
+        // Sample a subset of polygons (up to 20) as candidate planes
+        let sample_size = polygons.len().min(20);
+        for p in polygons.iter().take(sample_size) {
+            let plane = &p.plane;
             let mut num_front = 0;
             let mut num_back = 0;
             let mut num_spanning = 0;
 
             for poly in polygons {
                 match plane.classify_polygon(poly) {
-                    COPLANAR => {}, // not counted for balance
+                    COPLANAR => {}, // Not counted for balance
                     FRONT => num_front += 1,
                     BACK => num_back += 1,
                     SPANNING | _ => num_spanning += 1,
@@ -153,7 +106,6 @@ impl<S: Clone + Send + Sync + Debug> Node<S> {
                 best_plane = plane.clone();
             }
         }
-
         best_plane
     }
 
