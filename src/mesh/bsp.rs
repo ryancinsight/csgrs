@@ -81,7 +81,7 @@ impl<S: Clone + Send + Sync + Debug> Node<S> {
         let mut best_plane = polygons[0].plane.clone();
         let mut best_score = Real::MAX;
 
-        // Take a sample of polygons as candidate planes
+        // Sample a subset of polygons (up to 20) as candidate planes
         let sample_size = polygons.len().min(20);
         for p in polygons.iter().take(sample_size) {
             let plane = &p.plane;
@@ -94,8 +94,7 @@ impl<S: Clone + Send + Sync + Debug> Node<S> {
                     COPLANAR => {}, // Not counted for balance
                     FRONT => num_front += 1,
                     BACK => num_back += 1,
-                    SPANNING => num_spanning += 1,
-                    _ => num_spanning += 1, // Treat any other combination as spanning
+                    SPANNING | _ => num_spanning += 1,
                 }
             }
 
@@ -297,12 +296,33 @@ impl<S: Clone + Send + Sync + Debug> Node<S> {
                         })
                         .collect();
 
-                    // Convert crossing points to intersection edges
-                    intersection_edges.extend(
-                        crossing_points
-                            .chunks_exact(2)
-                            .map(|chunk| [chunk[0].clone(), chunk[1].clone()]),
-                    );
+                    // Pair up crossing points into edges while preserving order.
+                    // According to Jordan curve theorem a planar slice must create an
+                    // even number of intersection vertices per polygon (0 or 2*️⃣n).
+                    // Nevertheless, in the presence of numerical noise we may get an
+                    // odd number.  We therefore build edges iteratively and keep the
+                    // last unmatched vertex around.  This guarantees we never panic or
+                    // silently drop a point.
+
+                    let mut pending: Option<Vertex> = None;
+                    for cp in crossing_points {
+                        if let Some(first) = pending.take() {
+                            intersection_edges.push([first, cp]);
+                        } else {
+                            pending = Some(cp);
+                        }
+                    }
+
+                    // If one vertex is still pending we are in an inconsistent state
+                    // (odd number of crossings).  Instead of discarding it, we log a
+                    // debug message so the caller can diagnose geometric problems.
+                    if let Some(orphan) = pending {
+                        #[cfg(debug_assertions)]
+                        eprintln!(
+                            "[csgrs::bsp] Warning: odd number of slice intersections (orphan at {:?})",
+                            orphan.pos
+                        );
+                    }
                 },
 
                 _ => {

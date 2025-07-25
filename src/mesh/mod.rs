@@ -474,7 +474,15 @@ impl<S: Clone + Send + Sync + Debug> CSG for Mesh<S> {
     ///          +-------+            +-------+
     /// ```
     fn union(&self, other: &Mesh<S>) -> Mesh<S> {
-        // avoid splitting obvious non‑intersecting faces
+        // Fast paths for degenerate cases -------------------------------------------------
+        if self.polygons.is_empty() {
+            return other.clone();
+        }
+        if other.polygons.is_empty() {
+            return self.clone();
+        }
+
+        // avoid splitting obvious non-intersecting faces
         let (a_clip, a_passthru) =
             Self::partition_polys(&self.polygons, &other.bounding_box());
         let (b_clip, b_passthru) =
@@ -516,7 +524,15 @@ impl<S: Clone + Send + Sync + Debug> CSG for Mesh<S> {
     ///          +-------+
     /// ```
     fn difference(&self, other: &Mesh<S>) -> Mesh<S> {
-        // avoid splitting obvious non‑intersecting faces
+        // Fast paths -------------------------------------------------------
+        if other.polygons.is_empty() {
+            return self.clone();
+        }
+        if self.polygons.is_empty() {
+            return Mesh::new();
+        }
+
+        // avoid splitting obvious non-intersecting faces
         let (a_clip, a_passthru) =
             Self::partition_polys(&self.polygons, &other.bounding_box());
         let (b_clip, _b_passthru) =
@@ -706,13 +722,25 @@ impl<S: Clone + Send + Sync + Debug> CSG for Mesh<S> {
             // 1) Gather from the 3D polygons
             for poly in &self.polygons {
                 for v in &poly.vertices {
-                    min_x = *partial_min(&min_x, &v.pos.x).unwrap();
-                    min_y = *partial_min(&min_y, &v.pos.y).unwrap();
-                    min_z = *partial_min(&min_z, &v.pos.z).unwrap();
+                    if let Some(val) = partial_min(&min_x, &v.pos.x) {
+                        min_x = *val;
+                    }
+                    if let Some(val) = partial_min(&min_y, &v.pos.y) {
+                        min_y = *val;
+                    }
+                    if let Some(val) = partial_min(&min_z, &v.pos.z) {
+                        min_z = *val;
+                    }
 
-                    max_x = *partial_max(&max_x, &v.pos.x).unwrap();
-                    max_y = *partial_max(&max_y, &v.pos.y).unwrap();
-                    max_z = *partial_max(&max_z, &v.pos.z).unwrap();
+                    if let Some(val) = partial_max(&max_x, &v.pos.x) {
+                        max_x = *val;
+                    }
+                    if let Some(val) = partial_max(&max_y, &v.pos.y) {
+                        max_y = *val;
+                    }
+                    if let Some(val) = partial_max(&max_z, &v.pos.z) {
+                        max_z = *val;
+                    }
                 }
             }
 

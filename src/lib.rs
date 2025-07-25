@@ -52,3 +52,10 @@ compile_error!("Either 'f64' or 'f32' feature must be specified, but not both");
 
 #[cfg(test)]
 mod tests;
+
+// Additional focused regression suites
+#[cfg(test)]
+mod bounding_box_tests;
+
+#[cfg(test)]
+mod slice_tests;
