@@ -82,14 +82,21 @@ impl<S: Clone + Send + Sync + Debug> Node<S> {
         const K_SPANS_BASE: Real = 5.0;
         const K_BALANCE_BASE: Real = 1.0;
 
+        // ------------------------------------------------------------------
+        //  Adaptive coefficients – scale the balance penalty with the log10 of
+        //  the polygon count so extremely large meshes do not over-penalise
+        //  minor imbalances (KISS & ADP principles).
+        // ------------------------------------------------------------------
+        let poly_count = polygons.len().max(1) as Real;
+        let k_balance = K_BALANCE_BASE * poly_count.log10().max(1.0);
+
         let mut best_plane = polygons[0].plane.clone();
         let mut best_score = Real::MAX;
 
-        //  Sample a subset of polygons (≈√n, capped) as candidate planes.  We
-        //  pick them **uniformly** from the list (step sampling) instead of just
-        //  the first `k` polygons to avoid biasing towards spatially-coherent
-        //  input ordering.
-        let sample_size = ((polygons.len() as f64).sqrt() as usize).max(1).min(64);
+        // Larger meshes benefit from sampling more candidate planes – we use the
+        // cubic-root of n (≤128 cap) which empirically balances cost vs.
+        // quality and avoids missing good planes in dense areas.
+        let sample_size = ((polygons.len() as f64).cbrt() as usize).max(1).min(128);
         let step = (polygons.len() / sample_size.max(1)).max(1);
 
         for p in polygons.iter().step_by(step) {
@@ -111,7 +118,7 @@ impl<S: Clone + Send + Sync + Debug> Node<S> {
             // imbalance between front and back polygons. The weights are chosen
             // to strongly penalize splitting polygons.
             let balance = (num_front as Real - num_back as Real).abs();
-            let score = K_SPANS_BASE * num_spanning as Real + K_BALANCE_BASE * balance;
+            let score = K_SPANS_BASE * num_spanning as Real + k_balance * balance;
 
             //  Fast-path: perfect plane (no spanning + nearly balanced) – stop early.
             if num_spanning == 0 && balance <= 1.0 {

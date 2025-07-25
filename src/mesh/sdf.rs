@@ -5,6 +5,8 @@ use crate::mesh::Mesh;
 use crate::mesh::polygon::Polygon;
 use crate::mesh::vertex::Vertex;
 use fast_surface_nets::{SurfaceNetsBuffer, surface_nets};
+#[cfg(feature = "parallel")]
+use rayon::prelude::*;
 use nalgebra::{Point3, Vector3};
 use std::fmt::Debug;
 
@@ -70,6 +72,32 @@ impl<S: Clone + Debug + Send + Sync> Mesh<S> {
         // and store (f(p) - iso_value) so surface_nets finds zero-crossings at iso_value.
         // **Optimization**: Linear memory access pattern with better cache locality.
         #[allow(clippy::unnecessary_cast)]
+        #[cfg(feature = "parallel")]
+        field_values
+            .par_iter_mut()
+            .enumerate()
+            .for_each(|(idx, val)| {
+                let i = idx as u32;
+                let iz = i / (nx * ny);
+                let remainder = i % (nx * ny);
+                let iy = remainder / nx;
+                let ix = remainder % nx;
+
+                let xf = min_pt.x + (ix as Real) * dx;
+                let yf = min_pt.y + (iy as Real) * dy;
+                let zf = min_pt.z + (iz as Real) * dz;
+
+                let p = Point3::new(xf, yf, zf);
+                let sdf_val = sdf(&p);
+
+                *val = if sdf_val.is_finite() {
+                    (sdf_val - iso_value) as f32
+                } else {
+                    1e10_f32
+                };
+            });
+
+        #[cfg(not(feature = "parallel"))]
         for i in 0..(nx * ny * nz) {
             let iz = i / (nx * ny);
             let remainder = i % (nx * ny);
@@ -83,12 +111,9 @@ impl<S: Clone + Debug + Send + Sync> Mesh<S> {
             let p = Point3::new(xf, yf, zf);
             let sdf_val = sdf(&p);
 
-            // Robust finite value handling with mathematical correctness
             field_values[i as usize] = if sdf_val.is_finite() {
                 (sdf_val - iso_value) as f32
             } else {
-                // For infinite/NaN values, use large positive value to indicate "far outside"
-                // This preserves the mathematical properties of the distance field
                 1e10_f32
             };
         }
