@@ -423,13 +423,25 @@ impl<S: Clone + Send + Sync + Debug> CSG for Sketch<S> {
                 let max_pt = rect.max();
 
                 // Merge the 2D bounds into our existing min/max, forcing z=0 for 2D geometry.
-                min_x = *partial_min(&min_x, &min_pt.x).unwrap();
-                min_y = *partial_min(&min_y, &min_pt.y).unwrap();
-                min_z = *partial_min(&min_z, &0.0).unwrap();
+                if let Some(val) = partial_min(&min_x, &min_pt.x) {
+                    min_x = *val;
+                }
+                if let Some(val) = partial_min(&min_y, &min_pt.y) {
+                    min_y = *val;
+                }
+                if let Some(val) = partial_min(&min_z, &0.0) {
+                    min_z = *val;
+                }
 
-                max_x = *partial_max(&max_x, &max_pt.x).unwrap();
-                max_y = *partial_max(&max_y, &max_pt.y).unwrap();
-                max_z = *partial_max(&max_z, &0.0).unwrap();
+                if let Some(val) = partial_max(&max_x, &max_pt.x) {
+                    max_x = *val;
+                }
+                if let Some(val) = partial_max(&max_y, &max_pt.y) {
+                    max_y = *val;
+                }
+                if let Some(val) = partial_max(&max_z, &0.0) {
+                    max_z = *val;
+                }
             }
 
             // If still uninitialized (e.g., no geometry), return a trivial AABB at origin
