@@ -95,6 +95,7 @@ impl<S: Clone + Send + Sync + Debug> Mesh<S> {
     ///
     /// Complexity: *O(n log n)* on average using spatial hashing.
     pub fn weld_vertices_mut(&mut self, tol: Real) {
+        use crate::mesh::plane::Plane;
         use hashbrown::HashMap;
 
         if self.polygons.is_empty() {
@@ -128,6 +129,15 @@ impl<S: Clone + Send + Sync + Debug> Mesh<S> {
                     vmap.insert(k, v.clone());
                 }
             }
+
+            // Recompute plane from (potentially modified) vertices so future
+            // BSP operations receive an accurate plane equation.  This small
+            // extra cost is negligible compared to the spatial-hash pass and
+            // pays for itself by preventing micro-cracks at Boolean junctions.
+            poly.plane = Plane::from_vertices(poly.vertices.clone());
+
+            // Invalidate cached bounding box because vertices may have moved.
+            poly.bounding_box = std::sync::OnceLock::new();
         }
 
         // Recompute bounding box because vertices moved (possibly collapsed).
@@ -645,8 +655,26 @@ impl<S: Clone + Send + Sync + Debug> CSG for Mesh<S> {
     ///          +-------+
     /// ```
     fn intersection(&self, other: &Mesh<S>) -> Mesh<S> {
-        let mut a = Node::from_polygons(&self.polygons);
-        let mut b = Node::from_polygons(&other.polygons);
+        // Fast paths -------------------------------------------------------
+        if self.polygons.is_empty() || other.polygons.is_empty() {
+            return Mesh::new(); // empty intersection
+        }
+
+        // Restrict work to polygons whose AABBs overlap the other mesh – this
+        // can dramatically cut BSP depth for large models with sparse
+        // overlap regions (common in TPMS → shell intersections).
+        let (a_clip, _a_passthru) =
+            Self::partition_polys(&self.polygons, &other.bounding_box());
+        let (b_clip, _b_passthru) =
+            Self::partition_polys(&other.polygons, &self.bounding_box());
+
+        // If bounding boxes do not overlap, early-out.
+        if a_clip.is_empty() || b_clip.is_empty() {
+            return Mesh::new();
+        }
+
+        let mut a = Node::from_polygons(&a_clip);
+        let mut b = Node::from_polygons(&b_clip);
 
         a.invert();
         b.clip_to(&a);

@@ -75,16 +75,24 @@ impl<S: Clone + Send + Sync + Debug> Node<S> {
     }
 
     pub fn pick_best_splitting_plane(&self, polygons: &[Polygon<S>]) -> Plane {
-        const K_SPANS: Real = 8.0; // Weight for spanning polygons
-        const K_BALANCE: Real = 1.0; // Weight for front/back balance
+        //  Empirically-chosen base weights.  A lower K_SPANS strongly favours
+        //  planes that do *not* slice polygons while K_BALANCE nudges the split
+        //  towards a front/back equilibrium.  We derive an adaptive weight below
+        //  so meshes of radically different complexity keep consistent behaviour.
+        const K_SPANS_BASE: Real = 5.0;
+        const K_BALANCE_BASE: Real = 1.0;
 
         let mut best_plane = polygons[0].plane.clone();
         let mut best_score = Real::MAX;
 
-        // Sample a subset of polygons (≈√n, capped) as candidate planes.  This improves
-        // the quality of the heuristic without incurring O(n²) cost on large meshes.
+        //  Sample a subset of polygons (≈√n, capped) as candidate planes.  We
+        //  pick them **uniformly** from the list (step sampling) instead of just
+        //  the first `k` polygons to avoid biasing towards spatially-coherent
+        //  input ordering.
         let sample_size = ((polygons.len() as f64).sqrt() as usize).max(1).min(64);
-        for p in polygons.iter().take(sample_size) {
+        let step = (polygons.len() / sample_size.max(1)).max(1);
+
+        for p in polygons.iter().step_by(step) {
             let plane = &p.plane;
             let mut num_front = 0;
             let mut num_back = 0;
@@ -92,21 +100,30 @@ impl<S: Clone + Send + Sync + Debug> Node<S> {
 
             for poly in polygons {
                 match plane.classify_polygon(poly) {
-                    COPLANAR => {}, // Not counted for balance
+                    COPLANAR => { /* ignored for balance */ },
                     FRONT => num_front += 1,
                     BACK => num_back += 1,
                     SPANNING | _ => num_spanning += 1,
                 }
             }
 
-            let score = K_SPANS * num_spanning as Real
-                + K_BALANCE * ((num_front - num_back) as Real).abs();
+            // The score is a weighted sum of the number of spanning polygons and the
+            // imbalance between front and back polygons. The weights are chosen
+            // to strongly penalize splitting polygons.
+            let balance = (num_front as Real - num_back as Real).abs();
+            let score = K_SPANS_BASE * num_spanning as Real + K_BALANCE_BASE * balance;
+
+            //  Fast-path: perfect plane (no spanning + nearly balanced) – stop early.
+            if num_spanning == 0 && balance <= 1.0 {
+                return plane.clone();
+            }
 
             if score < best_score {
                 best_score = score;
                 best_plane = plane.clone();
             }
         }
+
         best_plane
     }
 
