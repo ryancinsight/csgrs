@@ -289,12 +289,72 @@ impl<S: Clone + Send + Sync + Debug> UnifiedBspNode<S> {
     
     /// Find intersection edge between two polygons on a slicing plane
     fn find_intersection_edge(
-        _front_poly: &Polygon<S>,
-        _back_poly: &Polygon<S>,
-        _slicing_plane: &Plane,
+        front_poly: &Polygon<S>,
+        back_poly: &Polygon<S>,
+        slicing_plane: &Plane,
     ) -> Option<[Vertex; 2]> {
-        // Simplified implementation - would need more sophisticated
-        // geometric intersection computation in full implementation
+        let mut intersection_points = Vec::new();
+        
+        // Find intersections between edges of front_poly and back_poly
+        for i in 0..front_poly.vertices.len() {
+            let v1 = &front_poly.vertices[i];
+            let v2 = &front_poly.vertices[(i + 1) % front_poly.vertices.len()];
+            
+            for j in 0..back_poly.vertices.len() {
+                let v3 = &back_poly.vertices[j];
+                let v4 = &back_poly.vertices[(j + 1) % back_poly.vertices.len()];
+                
+                if let Some(intersection) = Self::line_segment_intersection(v1, v2, v3, v4, slicing_plane) {
+                    intersection_points.push(intersection);
+                }
+            }
+        }
+        
+        // Return edge if we have exactly 2 intersection points
+        if intersection_points.len() >= 2 {
+            Some([intersection_points[0].clone(), intersection_points[1].clone()])
+        } else {
+            None
+        }
+    }
+    
+    /// Find intersection between two line segments on a plane
+    fn line_segment_intersection(
+        p1: &Vertex,
+        p2: &Vertex,
+        p3: &Vertex,
+        p4: &Vertex,
+        plane: &Plane,
+    ) -> Option<Vertex> {
+        let d1 = p2.pos - p1.pos;
+        let d2 = p4.pos - p3.pos;
+        let d3 = p1.pos - p3.pos;
+        
+        let cross = d1.cross(&d2);
+        let denom = cross.norm_squared();
+        
+        if denom < 1e-10 {
+            return None; // Lines are parallel
+        }
+        
+        let t1 = d3.cross(&d2).dot(&cross) / denom;
+        let t2 = d3.cross(&d1).dot(&cross) / denom;
+        
+        // Check if intersection is within both line segments
+        if t1 >= 0.0 && t1 <= 1.0 && t2 >= 0.0 && t2 <= 1.0 {
+            let intersection_pos = p1.pos + t1 * d1;
+            
+            // Verify the intersection lies on the slicing plane
+            let plane_normal = plane.normal();
+            let plane_offset = plane.offset();
+            if (plane_normal.dot(&intersection_pos.coords) - plane_offset).abs() < 1e-6 {
+                // Interpolate vertex attributes
+                let normal = (p1.normal + p2.normal).normalize();
+                
+                return Some(Vertex::new(intersection_pos, normal));
+            }
+        }
+        
         None
     }
 }

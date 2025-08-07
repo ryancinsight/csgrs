@@ -301,6 +301,23 @@ impl<S: Clone + Send + Sync + Debug> CSG for SvoMesh<S> {
         self.bounding_box = OnceLock::new();
     }
 
+    fn translate_vector(&self, vector: Vector3<Real>) -> Self {
+        let translation_matrix = Matrix4::new_translation(&vector);
+        self.transform(&translation_matrix)
+    }
+
+    fn translate(&self, x: Real, y: Real, z: Real) -> Self {
+        self.translate_vector(Vector3::new(x, y, z))
+    }
+
+    fn center(&self) -> Self {
+        let aabb = self.bounding_box();
+        let center_x = (aabb.mins.x + aabb.maxs.x) * 0.5;
+        let center_y = (aabb.mins.y + aabb.maxs.y) * 0.5;
+        let center_z = (aabb.mins.z + aabb.maxs.z) * 0.5;
+        self.translate(-center_x, -center_y, -center_z)
+    }
+
     fn float(&self) -> Self {
         let aabb = self.bounding_box();
         let min_z = aabb.mins.z;

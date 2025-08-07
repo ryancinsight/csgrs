@@ -523,9 +523,9 @@ impl FromSVG for Sketch<()> {
                 },
 
                 tag => {
-                    // TODO: Non-empty tags should also be supported
-
-                    unimplemented!("Parsing tag {tag:?}");
+                    // Skip unsupported tags with a warning instead of panicking
+                    eprintln!("Warning: Skipping unsupported SVG tag: {tag:?}");
+                    // Continue processing other elements
                 },
             }
         }
@@ -547,6 +547,25 @@ impl<S: Clone> ToSVG for Sketch<S> {
         let mut g = element::Group::new();
 
         let make_line_string = |line_string: &geo::LineString<Real>| {
+            let mut data = path::Data::new();
+            let mut points = line_string.coords();
+
+            if let Some(start) = points.next() {
+                data = data.move_to(start.x_y());
+            }
+            for point in points {
+                data = data.line_to(point.x_y());
+            }
+
+            element::Path::new()
+                .set("fill", "none")
+                .set("stroke", "black")
+                .set("stroke-width", 1)
+                .set("vector-effect", "non-scaling-stroke")
+                .set("d", data)
+        };
+
+        let make_polyline = |line_string: &geo::LineString<Real>| {
             let mut data = path::Data::new();
             let mut points = line_string.coords();
 
@@ -646,8 +665,35 @@ impl<S: Clone> ToSVG for Sketch<S> {
                     g = g.add(make_polygon(&triangle.to_polygon()));
                 },
 
-                GeometryCollection(_) => {
-                    unimplemented!("Exporting nested geometry collections to SVG")
+                GeometryCollection(collection) => {
+                    // Recursively export each geometry in the collection
+                    for geom in &collection.0 {
+                        match geom {
+                            geo::Geometry::Polygon(poly) => {
+                                g = g.add(make_polygon(poly));
+                            },
+                            geo::Geometry::MultiPolygon(multi_poly) => {
+                                for poly in &multi_poly.0 {
+                                    g = g.add(make_polygon(poly));
+                                }
+                            },
+                            geo::Geometry::LineString(line) => {
+                                g = g.add(make_polyline(line));
+                            },
+                            geo::Geometry::MultiLineString(multi_line) => {
+                                for line in &multi_line.0 {
+                                    g = g.add(make_polyline(line));
+                                }
+                            },
+                            geo::Geometry::Triangle(triangle) => {
+                                g = g.add(make_polygon(&triangle.to_polygon()));
+                            },
+                            // Skip unsupported nested geometry types
+                            _ => {
+                                eprintln!("Warning: Skipping unsupported nested geometry type in SVG export");
+                            }
+                        }
+                    }
                 },
 
                 // Can't really export points to SVG
