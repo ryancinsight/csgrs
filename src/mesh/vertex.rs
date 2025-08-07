@@ -40,6 +40,18 @@ impl Vertex {
         self.normal = -self.normal;
     }
 
+    /// Transform vertex by a 4x4 matrix
+    pub fn transform(&self, matrix: &nalgebra::Matrix4<Real>) -> Self {
+        let pos_homogeneous = matrix * self.pos.to_homogeneous();
+        let new_pos = Point3::from(pos_homogeneous.xyz());
+        
+        // Transform normal (use inverse transpose for proper normal transformation)
+        let normal_matrix = matrix.fixed_view::<3, 3>(0, 0);
+        let new_normal = normal_matrix * self.normal;
+        
+        Vertex::new(new_pos, new_normal)
+    }
+
     /// **Mathematical Foundation: Barycentric Linear Interpolation**
     ///
     /// Compute the barycentric linear interpolation between `self` (`t = 0`) and `other` (`t = 1`).

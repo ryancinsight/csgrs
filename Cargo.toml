@@ -154,3 +154,4 @@ bevymesh = [
   "dep:bevy_asset",
   "dep:wgpu-types"
 ]
+parry3d = ["dep:parry3d"]

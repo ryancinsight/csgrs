@@ -27,3 +27,8 @@ xtask/target/
 *.obj
 *.amf
 *.ply
+
+# Product Requirements Documents
+src/voxels/PRD.md
+src/voxels/CHECKLIST.md
+src/voxels/README.md

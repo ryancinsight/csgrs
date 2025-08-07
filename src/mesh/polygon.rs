@@ -384,6 +384,23 @@ impl<S: Clone + Send + Sync> Polygon<S> {
     pub fn set_metadata(&mut self, data: S) {
         self.metadata = Some(data);
     }
+
+    /// Calculate the center point of the polygon
+    pub fn center(&self) -> Point3<Real> {
+        let sum = self.vertices.iter().fold(Vector3::zeros(), |acc, v| {
+            acc + v.pos.coords
+        });
+        Point3::from(sum / self.vertices.len() as Real)
+    }
+
+    /// Transform the polygon by a 4x4 matrix
+    pub fn transform(&self, matrix: &nalgebra::Matrix4<Real>) -> Self {
+        let transformed_vertices = self.vertices.iter()
+            .map(|v| v.transform(matrix))
+            .collect();
+        
+        Self::new(transformed_vertices, self.metadata.clone())
+    }
 }
 
 /// Given a normal vector `n`, build two perpendicular unit vectors `u` and `v` so that
