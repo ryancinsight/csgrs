@@ -39,6 +39,9 @@ pub struct UnifiedBspNode<S: Clone + Send + Sync + Debug> {
     
     /// Polygons stored at this node
     pub polygons: Vec<Polygon<S>>,
+    
+    /// Current depth in the BSP tree
+    pub depth: usize,
 }
 
 impl<S: Clone + Send + Sync + Debug> Default for UnifiedBspNode<S> {
@@ -55,6 +58,7 @@ impl<S: Clone + Send + Sync + Debug> UnifiedBspNode<S> {
             front: None,
             back: None,
             polygons: Vec::new(),
+            depth: 0,
         }
     }
     
@@ -196,23 +200,43 @@ impl<S: Clone + Send + Sync + Debug> UnifiedBspNode<S> {
     
     /// Get all polygons from this BSP tree
     pub fn all_polygons(&self) -> Vec<Polygon<S>> {
-        let mut result = self.polygons.clone();
+        let mut result = Vec::new();
+        let mut stack = vec![self];
         
-        if let Some(ref front) = self.front {
-            result.extend(front.all_polygons());
-        }
-        if let Some(ref back) = self.back {
-            result.extend(back.all_polygons());
+        while let Some(node) = stack.pop() {
+            // Add polygons from this node
+            result.extend(node.polygons.iter().cloned());
+            
+            // Add children to stack for processing
+            if let Some(ref front) = node.front {
+                stack.push(front.as_ref());
+            }
+            if let Some(ref back) = node.back {
+                stack.push(back.as_ref());
+            }
         }
         
         result
     }
     
-    /// Build BSP tree from polygons
+    /// Build BSP tree from polygons recursively with depth limit
     pub fn build(&mut self, polygons: &[Polygon<S>]) {
-        if polygons.is_empty() {
+        self.build_with_depth(polygons, 0);
+    }
+    
+    /// Build BSP tree with explicit depth tracking
+    fn build_with_depth(&mut self, polygons: &[Polygon<S>], depth: usize) {
+        const MAX_DEPTH: usize = 20; // Prevent stack overflow
+        const MIN_POLYGONS: usize = 4; // Stop subdividing small sets
+        
+        if polygons.is_empty() || depth >= MAX_DEPTH || polygons.len() <= MIN_POLYGONS {
+            // Store all polygons at this node if we hit limits
+            self.polygons.extend(polygons.iter().cloned());
+            self.depth = depth;
             return;
         }
+        
+        self.depth = depth;
         
         // Select splitting plane
         self.plane = Some(self.pick_best_splitting_plane(polygons));
@@ -234,16 +258,16 @@ impl<S: Clone + Send + Sync + Debug> UnifiedBspNode<S> {
             self.polygons.append(&mut coplanar_back);
         }
         
-        // Recursively build children if they have polygons
+        // Create and build children recursively if they have polygons
         if !front_polys.is_empty() {
             let mut front_node = Box::new(UnifiedBspNode::new());
-            front_node.build(&front_polys);
+            front_node.build_with_depth(&front_polys, depth + 1);
             self.front = Some(front_node);
         }
         
         if !back_polys.is_empty() {
             let mut back_node = Box::new(UnifiedBspNode::new());
-            back_node.build(&back_polys);
+            back_node.build_with_depth(&back_polys, depth + 1);
             self.back = Some(back_node);
         }
     }
@@ -252,36 +276,34 @@ impl<S: Clone + Send + Sync + Debug> UnifiedBspNode<S> {
     pub fn slice(&self, slicing_plane: &Plane) -> (Vec<Polygon<S>>, Vec<[Vertex; 2]>) {
         let mut result_polygons = Vec::new();
         let mut result_edges = Vec::new();
+        let mut stack = vec![self];
         
-        // Process polygons at this node
-        for polygon in &self.polygons {
-            let (front, back, coplanar_front, coplanar_back) = slicing_plane.split_polygon(polygon);
-            
-            // Add coplanar polygons to result
-            result_polygons.extend(coplanar_front);
-            result_polygons.extend(coplanar_back);
-            
-            // Generate edge segments from split polygons
-            for front_poly in &front {
-                for back_poly in &back {
-                    if let Some(edge) = Self::find_intersection_edge(front_poly, back_poly, slicing_plane) {
-                        result_edges.push(edge);
+        while let Some(node) = stack.pop() {
+            // Process polygons at this node
+            for polygon in &node.polygons {
+                let (front, back, coplanar_front, coplanar_back) = slicing_plane.split_polygon(polygon);
+                
+                // Add coplanar polygons to result
+                result_polygons.extend(coplanar_front);
+                result_polygons.extend(coplanar_back);
+                
+                // Generate edge segments from split polygons
+                for front_poly in &front {
+                    for back_poly in &back {
+                        if let Some(edge) = Self::find_intersection_edge(front_poly, back_poly, slicing_plane) {
+                            result_edges.push(edge);
+                        }
                     }
                 }
             }
-        }
-        
-        // Recursively process children
-        if let Some(ref front) = self.front {
-            let (mut polys, mut edges) = front.slice(slicing_plane);
-            result_polygons.append(&mut polys);
-            result_edges.append(&mut edges);
-        }
-        
-        if let Some(ref back) = self.back {
-            let (mut polys, mut edges) = back.slice(slicing_plane);
-            result_polygons.append(&mut polys);
-            result_edges.append(&mut edges);
+            
+            // Add children to stack for processing
+            if let Some(ref front) = node.front {
+                stack.push(front.as_ref());
+            }
+            if let Some(ref back) = node.back {
+                stack.push(back.as_ref());
+            }
         }
         
         (result_polygons, result_edges)

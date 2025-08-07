@@ -17,6 +17,9 @@ use image::{GrayImage, ImageBuffer};
 #[cfg(feature = "metaballs")]
 use csgrs::mesh::metaballs::MetaBall;
 
+#[cfg(feature = "sdf")]
+use csgrs::voxels::{svo_mesh::SvoMesh, conversion::MeshConversion};
+
 type Mesh = csgrs::mesh::Mesh<()>;
 type Sketch = csgrs::sketch::Sketch<()>;
 
@@ -402,6 +405,34 @@ fn main() {
         let _ = std::fs::write(
             "stl/sdf_sphere.stl",
             csg_shape.to_stl_binary("sdf_sphere").unwrap(),
+        );
+    }
+
+    // Create SDF sphere using voxels module for comparison
+    #[cfg(feature = "sdf")]
+    {
+        // Same SDF function as above for direct comparison
+        let sphere_sdf = |p: &Point3<Real>| p.coords.norm() - 1.5;
+
+        let bounds_min = Point3::new(-2.0, -2.0, -2.0);
+        let bounds_max = Point3::new(2.0, 2.0, 2.0);
+        let resolution = (60, 60, 60); // Same resolution as regular SDF sphere
+
+        let voxel_sphere = SvoMesh::<()>::sdf_with_resolution(
+            sphere_sdf,
+            resolution,
+            bounds_min,
+            bounds_max,
+            None,
+        );
+
+        // Convert SvoMesh to regular Mesh for STL export
+        let voxel_sphere_mesh = Mesh::from_svo_mesh(&voxel_sphere);
+
+        #[cfg(feature = "stl-io")]
+        let _ = std::fs::write(
+            "stl/sdf_sphere_voxel.stl",
+            voxel_sphere_mesh.to_stl_binary("sdf_sphere_voxel").unwrap(),
         );
     }
 

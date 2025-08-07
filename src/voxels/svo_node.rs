@@ -22,8 +22,8 @@ use std::fmt::Debug;
 // Constants
 const OCTREE_CHILDREN: usize = 8;
 const MIN_VOXEL_SIZE: f64 = 0.001;
-const MAX_SUBDIVISION_DEPTH: usize = 10;
-const SUBDIVISION_THRESHOLD: usize = 10;
+const MAX_SUBDIVISION_DEPTH: usize = 5;
+const SUBDIVISION_THRESHOLD: usize = 100;
 
 /// Sparse Voxel Octree node with embedded BSP functionality
 /// 
@@ -101,14 +101,38 @@ impl<S: Clone + Send + Sync + Debug> SvoNode<S> {
     }
     
     /// Insert polygons into this node with adaptive subdivision
-    pub fn insert_polygons(&mut self, polygons: &[Polygon<S>], config: &PrecisionConfig) {
+    pub fn insert_polygons(&mut self, polygons: &[Polygon<S>], _config: &PrecisionConfig) {
         if polygons.is_empty() {
             return;
         }
         
-        // Check subdivision criteria
+        // Use a recursive helper to avoid unsafe code
+        self.insert_polygons_recursive(polygons);
+    }
+    
+    fn insert_polygons_recursive(&mut self, polygons: &[Polygon<S>]) {
         if self.should_subdivide(polygons) {
-            self.subdivide_and_distribute(polygons, config);
+            // Create children if they don't exist
+            if self.children.iter().all(|child| child.is_none()) {
+                let child_bounds = self.compute_child_bounds();
+                for (i, bounds) in child_bounds.iter().enumerate() {
+                    self.children[i] = Some(Box::new(SvoNode::new_with_depth(*bounds, self.depth + 1)));
+                }
+            }
+            
+            // Distribute polygons to children
+            for (i, child_bounds) in self.compute_child_bounds().iter().enumerate() {
+                let child_polygons: Vec<_> = polygons.iter()
+                    .filter(|poly| self.polygon_intersects_bounds(poly, child_bounds))
+                    .cloned()
+                    .collect();
+                
+                if !child_polygons.is_empty() {
+                    if let Some(ref mut child) = self.children[i] {
+                        child.insert_polygons_recursive(&child_polygons);
+                    }
+                }
+            }
         } else {
             // Store polygons in local BSP
             self.bsp = Some(UnifiedBspNode::from_polygons(polygons));
@@ -167,24 +191,7 @@ impl<S: Clone + Send + Sync + Debug> SvoNode<S> {
     }
     
     /// Subdivide this node and distribute polygons to children
-    fn subdivide_and_distribute(&mut self, polygons: &[Polygon<S>], config: &PrecisionConfig) {
-        let child_bounds = self.compute_child_bounds();
-        
-        // Create children only for octants that will contain geometry
-        for (i, bounds) in child_bounds.iter().enumerate() {
-            let child_polygons: Vec<_> = polygons
-                .iter()
-                .filter(|poly| self.polygon_intersects_bounds(poly, bounds))
-                .cloned()
-                .collect();
-            
-            if !child_polygons.is_empty() {
-                let mut child = Box::new(SvoNode::new_with_depth(*bounds, self.depth + 1));
-                child.insert_polygons(&child_polygons, config);
-                self.children[i] = Some(child);
-            }
-        }
-    }
+
     
     /// Compute bounding boxes for the 8 octree children
     fn compute_child_bounds(&self) -> [Aabb; OCTREE_CHILDREN] {
@@ -217,16 +224,19 @@ impl<S: Clone + Send + Sync + Debug> SvoNode<S> {
     /// Get all polygons from this node and its children
     pub fn all_polygons(&self) -> Vec<Polygon<S>> {
         let mut result = Vec::new();
+        let mut stack = vec![self];
         
-        // Add polygons from local BSP
-        if let Some(ref bsp) = self.bsp {
-            result.extend(bsp.all_polygons());
-        }
-        
-        // Add polygons from children
-        for child in &self.children {
-            if let Some(child_node) = child {
-                result.extend(child_node.all_polygons());
+        while let Some(node) = stack.pop() {
+            // Add polygons from local BSP
+            if let Some(ref bsp) = node.bsp {
+                result.extend(bsp.all_polygons());
+            }
+            
+            // Add children to stack for processing
+            for child in &node.children {
+                if let Some(child_node) = child {
+                    stack.push(child_node.as_ref());
+                }
             }
         }
         
@@ -240,34 +250,42 @@ impl<S: Clone + Send + Sync + Debug> SvoNode<S> {
         }
         
         let mut result = Vec::new();
+        let mut stack = vec![(self, polygons.to_vec())];
         
-        // First clip against local BSP if present
-        let current_polygons = if let Some(ref bsp) = self.bsp {
-            bsp.clip_polygons(polygons)
-        } else {
-            polygons.to_vec()
-        };
-        
-        // Then clip against children
-        for child in &self.children {
-            if let Some(child_node) = child {
-                // Only process polygons that intersect this child's bounds
-                let child_polygons: Vec<_> = current_polygons
-                    .iter()
-                    .filter(|poly| self.polygon_intersects_bounds(poly, &child_node.bounds))
-                    .cloned()
-                    .collect();
-                
-                if !child_polygons.is_empty() {
-                    let clipped = child_node.clip_polygons(&child_polygons);
-                    result.extend(clipped);
+        while let Some((node, current_polygons)) = stack.pop() {
+            if current_polygons.is_empty() {
+                continue;
+            }
+            
+            // First clip against local BSP if present
+            let clipped_polygons = if let Some(ref bsp) = node.bsp {
+                bsp.clip_polygons(&current_polygons)
+            } else {
+                current_polygons.clone()
+            };
+            
+            let mut has_children = false;
+            // Then clip against children
+            for child in &node.children {
+                if let Some(child_node) = child {
+                    has_children = true;
+                    // Only process polygons that intersect this child's bounds
+                    let child_polygons: Vec<_> = clipped_polygons
+                        .iter()
+                        .filter(|poly| node.polygon_intersects_bounds(poly, &child_node.bounds))
+                        .cloned()
+                        .collect();
+                    
+                    if !child_polygons.is_empty() {
+                        stack.push((child_node.as_ref(), child_polygons));
+                    }
                 }
             }
-        }
-        
-        // If no children processed the polygons, return the current set
-        if result.is_empty() && !current_polygons.is_empty() {
-            result = current_polygons;
+            
+            // If no children, add the clipped polygons to result
+            if !has_children && !clipped_polygons.is_empty() {
+                result.extend(clipped_polygons);
+            }
         }
         
         result
@@ -290,13 +308,16 @@ impl<S: Clone + Send + Sync + Debug> SvoNode<S> {
     
     /// Clip this node to another SVO node
     pub fn clip_to(&mut self, other: &SvoNode<S>) {
+        let all_other_polygons = other.all_polygons();
+        if all_other_polygons.is_empty() {
+            return;
+        }
+        
+        let other_bsp = UnifiedBspNode::from_polygons(&all_other_polygons);
+        
         // Clip local BSP
         if let Some(ref mut bsp) = self.bsp {
-            let all_other_polygons = other.all_polygons();
-            if !all_other_polygons.is_empty() {
-                let other_bsp = UnifiedBspNode::from_polygons(&all_other_polygons);
-                bsp.clip_to(&other_bsp);
-            }
+            bsp.clip_to(&other_bsp);
         }
         
         // Recursively clip children
@@ -309,18 +330,23 @@ impl<S: Clone + Send + Sync + Debug> SvoNode<S> {
     
     /// Compute memory usage of this node and its subtree
     pub fn memory_usage(&self) -> usize {
-        let mut size = std::mem::size_of::<Self>();
+        let mut size = 0;
+        let mut stack = vec![self];
         
-        // Add BSP memory usage
-        if let Some(ref bsp) = self.bsp {
-            size += std::mem::size_of_val(bsp);
-            size += bsp.all_polygons().len() * std::mem::size_of::<Polygon<S>>();
-        }
-        
-        // Add children memory usage
-        for child in &self.children {
-            if let Some(child_node) = child {
-                size += child_node.memory_usage();
+        while let Some(node) = stack.pop() {
+            size += std::mem::size_of::<Self>();
+            
+            // Add BSP memory usage
+            if let Some(ref bsp) = node.bsp {
+                size += std::mem::size_of_val(bsp);
+                size += bsp.all_polygons().len() * std::mem::size_of::<Polygon<S>>();
+            }
+            
+            // Add children to stack for processing
+            for child in &node.children {
+                if let Some(child_node) = child {
+                    stack.push(child_node.as_ref());
+                }
             }
         }
         
@@ -330,33 +356,31 @@ impl<S: Clone + Send + Sync + Debug> SvoNode<S> {
     /// Get statistics about this node and its subtree
     pub fn statistics(&self) -> SvoStatistics {
         let mut stats = SvoStatistics::default();
+        let mut stack = vec![self];
         
-        // Count this node
-        stats.total_nodes += 1;
-        if self.is_leaf() {
-            stats.leaf_nodes += 1;
-        }
-        if self.bsp.is_some() {
-            stats.nodes_with_geometry += 1;
-        }
-        
-        // Count polygons
-        if let Some(ref bsp) = self.bsp {
-            stats.total_polygons += bsp.all_polygons().len();
-        }
-        
-        // Update depth
-        stats.max_depth = stats.max_depth.max(self.depth);
-        
-        // Recursively collect from children
-        for child in &self.children {
-            if let Some(child_node) = child {
-                let child_stats = child_node.statistics();
-                stats.total_nodes += child_stats.total_nodes;
-                stats.leaf_nodes += child_stats.leaf_nodes;
-                stats.nodes_with_geometry += child_stats.nodes_with_geometry;
-                stats.total_polygons += child_stats.total_polygons;
-                stats.max_depth = stats.max_depth.max(child_stats.max_depth);
+        while let Some(node) = stack.pop() {
+            // Count this node
+            stats.total_nodes += 1;
+            if node.is_leaf() {
+                stats.leaf_nodes += 1;
+            }
+            if node.bsp.is_some() {
+                stats.nodes_with_geometry += 1;
+            }
+            
+            // Count polygons
+            if let Some(ref bsp) = node.bsp {
+                stats.total_polygons += bsp.all_polygons().len();
+            }
+            
+            // Update depth
+            stats.max_depth = stats.max_depth.max(node.depth);
+            
+            // Add children to stack for processing
+            for child in &node.children {
+                if let Some(child_node) = child {
+                    stack.push(child_node.as_ref());
+                }
             }
         }
         
