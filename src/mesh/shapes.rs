@@ -737,6 +737,29 @@ impl<S: Clone + Debug + Send + Sync> Mesh<S> {
         Self::polyhedron(&scaled, &faces, metadata).unwrap()
     }
 
+    /// Regular tetrahedron scaled by `radius`
+    pub fn tetrahedron(radius: Real, metadata: Option<S>) -> Self {
+        // Regular tetrahedron vertices (circumradius = 1)
+        let inv_sqrt3 = 1.0 / 3.0_f64.sqrt() as Real;
+        let pts = &[
+            [inv_sqrt3, inv_sqrt3, inv_sqrt3],
+            [-inv_sqrt3, -inv_sqrt3, inv_sqrt3],
+            [-inv_sqrt3, inv_sqrt3, -inv_sqrt3],
+            [inv_sqrt3, -inv_sqrt3, -inv_sqrt3],
+        ];
+        let faces: [&[usize]; 4] = [
+            &[0, 1, 2],
+            &[0, 2, 3],
+            &[0, 3, 1],
+            &[1, 3, 2],
+        ];
+        let scaled: Vec<[Real; 3]> = pts
+            .iter()
+            .map(|&[x, y, z]| [x * radius, y * radius, z * radius])
+            .collect();
+        Self::polyhedron(&scaled, &faces, metadata).unwrap()
+    }
+
     /// Regular icosahedron scaled by `radius`
     pub fn icosahedron(radius: Real, metadata: Option<S>) -> Self {
         // radius scale factor

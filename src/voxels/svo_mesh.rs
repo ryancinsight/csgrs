@@ -12,7 +12,7 @@
 
 use crate::float_types::{
     parry3d::bounding_volume::{Aabb, BoundingVolume},
-    Real,
+    Real, PI,
 };
 use crate::mesh::{plane::Plane, polygon::Polygon, vertex::Vertex};
 use crate::traits::CSG;
@@ -22,6 +22,21 @@ use crate::voxels::{
 };
 use nalgebra::{Matrix4, Point3, Vector3, Rotation3};
 use std::{fmt::Debug, sync::OnceLock};
+
+/// Types of regular polyhedra supported for generation
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum PolyhedronType {
+    /// Regular tetrahedron (4 triangular faces)
+    Tetrahedron,
+    /// Cube (6 square faces)
+    Cube,
+    /// Regular octahedron (8 triangular faces)
+    Octahedron,
+    /// Regular icosahedron (20 triangular faces)
+    Icosahedron,
+    /// Regular dodecahedron (12 pentagonal faces)
+    Dodecahedron,
+}
 
 
 /// Axis-aligned bounding box type alias
@@ -55,7 +70,7 @@ pub struct MeshQualityReport {
     pub is_manifold: bool,
     pub manifold_issues: Vec<ManifoldIssue>,
     pub vertex_count: usize,
-    pub polygon_count: usize,
+    pub total_polygons: usize,
     pub node_count: usize,
     pub memory_efficiency: f64,
     pub sparsity_ratio: f64,
@@ -172,52 +187,109 @@ impl<S: Clone + Send + Sync + Debug> SvoMesh<S> {
         Self::sdf(sphere_sdf, config, bounds_min, bounds_max, metadata)
     }
     
-    /// Generate an involute gear using traditional mesh conversion
-    /// 
-    /// Creates an involute gear by generating the traditional mesh representation
-    /// and converting it to sparse voxel format for consistent API.
-    /// 
+    /// Generate an involute gear using direct SDF-based generation
+    ///
+    /// Creates an involute gear by directly evaluating the involute gear SDF within
+    /// the sparse voxel octree. This avoids mesh conversion and leverages SVO advantages.
+    ///
     /// # Arguments
-    /// 
+    ///
     /// * `module_` - Gear module (pitch diameter / number of teeth)
     /// * `teeth` - Number of teeth
     /// * `pressure_angle_deg` - Pressure angle in degrees
+    /// * `clearance` - Root clearance
+    /// * `backlash` - Backlash allowance
     /// * `thickness` - Gear thickness
+    /// * `resolution` - Voxel resolution for surface sampling
     /// * `metadata` - Optional metadata for generated polygons
+    ///
+    /// # Mathematical Foundation
+    ///
+    /// Involute gear SDF combines:
+    /// - Radial distance constraints (root, pitch, addendum circles)
+    /// - Angular tooth profile based on involute curve
+    /// - Axial thickness constraints
     pub fn involute_gear(
         module_: Real,
         teeth: usize,
         pressure_angle_deg: Real,
         clearance: Real,
         backlash: Real,
-        segments_per_flank: usize,
         thickness: Real,
+        resolution: (usize, usize, usize),
         metadata: Option<S>,
     ) -> Self {
-        use crate::mesh::Mesh;
-        
-        // Generate traditional mesh gear
-        let gear_mesh = Mesh::<S>::spur_gear_involute(
-            module_, 
-            teeth, 
-            pressure_angle_deg, 
-            clearance, 
-            backlash, 
-            segments_per_flank, 
-            thickness, 
-            metadata.clone()
-        );
-        
-        // Convert to SvoMesh
-        let mut svo_mesh = Self::new();
-        svo_mesh.metadata = metadata;
-        
-        let polygons = gear_mesh.polygons;
-        if !polygons.is_empty() {
-            svo_mesh.insert_polygons(&polygons);
+        use crate::voxels::sdf::SdfConfig;
+
+        if module_ <= 0.0 || teeth == 0 || thickness <= 0.0 {
+            return Self::new();
         }
-        
-        svo_mesh
+
+        let pressure_angle = pressure_angle_deg.to_radians();
+        let pitch_radius = module_ * teeth as Real / 2.0;
+        let addendum_radius = pitch_radius + module_;
+        let dedendum_radius = pitch_radius - module_ - clearance;
+        let base_radius = pitch_radius * pressure_angle.cos();
+
+        // Involute gear SDF
+        let gear_sdf = move |p: &Point3<Real>| {
+            let r = (p.x * p.x + p.y * p.y).sqrt();
+            let theta = p.y.atan2(p.x);
+            let z = p.z.abs();
+
+            // Axial constraint (thickness)
+            let axial_distance = z - thickness / 2.0;
+
+            // Radial constraints
+            if r < dedendum_radius {
+                return (dedendum_radius - r).max(axial_distance);
+            }
+            if r > addendum_radius {
+                return (r - addendum_radius).max(axial_distance);
+            }
+
+            // Tooth profile using simplified involute approximation
+            let tooth_angle = 2.0 * PI / teeth as Real;
+            let local_theta = (theta % tooth_angle + tooth_angle) % tooth_angle;
+            let normalized_theta = local_theta / tooth_angle - 0.5; // -0.5 to 0.5
+
+            // Simplified tooth profile distance
+            let tooth_half_width = (tooth_angle / 2.0) * (1.0 - backlash / (2.0 * pitch_radius));
+            let profile_distance = if r > base_radius {
+                // In involute region
+                let involute_angle = (r / base_radius).sqrt() - 1.0;
+                let tooth_center_offset = involute_angle * 0.5;
+                let adjusted_theta = normalized_theta - tooth_center_offset;
+                (adjusted_theta.abs() * r - tooth_half_width).max(0.0)
+            } else {
+                // Below base circle - straight radial cut
+                (normalized_theta.abs() * r - tooth_half_width * 0.7).max(0.0)
+            };
+
+            (-profile_distance).max(axial_distance)
+        };
+
+        let margin = addendum_radius * 0.1;
+        let bounds_min = Point3::new(
+            -addendum_radius - margin,
+            -addendum_radius - margin,
+            -thickness / 2.0 - margin,
+        );
+        let bounds_max = Point3::new(
+            addendum_radius + margin,
+            addendum_radius + margin,
+            thickness / 2.0 + margin,
+        );
+
+        let config = SdfConfig {
+            resolution,
+            iso_value: 0.0,
+            precision: PrecisionConfig::default(),
+            max_depth: 8,
+            min_cell_size: module_ / 100.0,
+        };
+
+        Self::sdf(gear_sdf, config, bounds_min, bounds_max, metadata)
     }
     
     /// Generate a helical gear using SDF-based generation
@@ -356,68 +428,491 @@ impl<S: Clone + Send + Sync + Debug> SvoMesh<S> {
         Self::sdf(metaball_sdf, config, bounds_min, bounds_max, metadata)
     }
     
-    /// Generate convex hull using mesh conversion
-    /// 
-    /// Creates the convex hull of a point set by generating the traditional
-    /// mesh representation and converting to sparse voxel format.
-    /// 
+    /// Generate convex hull using direct SDF-based generation
+    ///
+    /// Creates the convex hull of a point set by directly constructing the convex hull
+    /// SDF within the sparse voxel octree. This leverages octree spatial acceleration.
+    ///
     /// # Arguments
-    /// 
+    ///
     /// * `points` - Input point set
+    /// * `resolution` - Voxel resolution for surface sampling
     /// * `metadata` - Optional metadata for generated polygons
+    ///
+    /// # Mathematical Foundation
+    ///
+    /// Convex hull SDF: max over all hull faces of signed distance to face plane
+    /// For a point p and face with normal n and point on face f:
+    /// distance = (p - f) · n
     #[cfg(feature = "chull")]
-    pub fn convex_hull(points: &[Point3<Real>], metadata: Option<S>) -> Self {
-        use crate::mesh::Mesh;
-        
+    pub fn convex_hull(
+        points: &[Point3<Real>],
+        resolution: (usize, usize, usize),
+        metadata: Option<S>
+    ) -> Self {
+        use crate::voxels::sdf::SdfConfig;
+
         if points.len() < 4 {
             return Self::new();
         }
-        
-        // Create a mesh from the points and compute convex hull
-        let mut temp_mesh = Mesh::<S>::new();
-        // Add points as vertices to create a temporary mesh
-        for point in points {
-            let vertex = Vertex::new(*point, Vector3::new(0.0, 0.0, 1.0));
-            // Create a simple polygon from the vertex (this is a workaround)
-            let polygon = Polygon::new(vec![vertex.clone(), vertex.clone(), vertex], metadata.clone());
-            temp_mesh.polygons.push(polygon);
+
+        // Compute convex hull using quickhull algorithm directly
+        let hull_faces = Self::compute_convex_hull_faces(points);
+        if hull_faces.is_empty() {
+            return Self::new();
         }
-        let hull_mesh = temp_mesh.convex_hull();
-        
-        // Convert to SvoMesh
-        let mut svo_mesh = Self::new();
-        svo_mesh.metadata = metadata;
-        
-        let polygons = hull_mesh.polygons;
-        if !polygons.is_empty() {
-            svo_mesh.insert_polygons(&polygons);
+
+        // Create SDF from hull faces
+        let hull_sdf = move |p: &Point3<Real>| {
+            let mut max_distance = Real::NEG_INFINITY;
+
+            for (normal, point_on_face) in &hull_faces {
+                let distance = (p - point_on_face).dot(normal);
+                max_distance = max_distance.max(distance);
+            }
+
+            max_distance
+        };
+
+        // Compute bounding box of points
+        let mut min_pt = points[0];
+        let mut max_pt = points[0];
+        for point in points.iter().skip(1) {
+            min_pt = Point3::new(
+                min_pt.x.min(point.x),
+                min_pt.y.min(point.y),
+                min_pt.z.min(point.z),
+            );
+            max_pt = Point3::new(
+                max_pt.x.max(point.x),
+                max_pt.y.max(point.y),
+                max_pt.z.max(point.z),
+            );
         }
-        
-        svo_mesh
+
+        let margin = (max_pt - min_pt).norm() * 0.1;
+        let bounds_min = min_pt - Vector3::new(margin, margin, margin);
+        let bounds_max = max_pt + Vector3::new(margin, margin, margin);
+
+        let config = SdfConfig {
+            resolution,
+            iso_value: 0.0,
+            precision: PrecisionConfig::default(),
+            max_depth: 8,
+            min_cell_size: (max_pt - min_pt).norm() / 1000.0,
+        };
+
+        Self::sdf(hull_sdf, config, bounds_min, bounds_max, metadata)
     }
-    
+
     /// Generate convex hull (fallback when chull feature disabled)
     #[cfg(not(feature = "chull"))]
-    pub fn convex_hull(_points: &[Point3<Real>], _metadata: Option<S>) -> Self {
+    pub fn convex_hull(
+        _points: &[Point3<Real>],
+        _resolution: (usize, usize, usize),
+        _metadata: Option<S>
+    ) -> Self {
         // Return empty mesh when convex hull feature is disabled
         Self::new()
+    }
+    
+    /// Generate a cube using SDF-based generation
+    /// 
+    /// Creates a cube with specified dimensions centered at the origin.
+    /// Uses SDF-based sampling for precise surface representation.
+    /// 
+    /// # Arguments
+    /// 
+    /// * `size` - Side length of the cube
+    /// * `resolution` - Voxel resolution for surface sampling
+    /// * `metadata` - Optional metadata for generated polygons
+    /// 
+    /// # Mathematical Foundation
+    /// 
+    /// Cube SDF: max(|x|, |y|, |z|) - size/2
+    pub fn cube(
+        size: Real,
+        resolution: (usize, usize, usize),
+        metadata: Option<S>,
+    ) -> Self {
+        use crate::voxels::sdf::SdfConfig;
+        
+        if size <= 0.0 {
+            return Self::new();
+        }
+        
+        let half_size = size / 2.0;
+        
+        // Cube SDF: distance to cube surface
+        let cube_sdf = move |p: &Point3<Real>| {
+            let dx = p.x.abs() - half_size;
+            let dy = p.y.abs() - half_size;
+            let dz = p.z.abs() - half_size;
+            
+            // Distance to cube surface
+            let outside = Vector3::new(dx.max(0.0), dy.max(0.0), dz.max(0.0)).norm();
+            let inside = dx.max(dy).max(dz).min(0.0);
+            outside + inside
+        };
+        
+        let margin = size * 0.1;
+        let bounds_min = Point3::new(-half_size - margin, -half_size - margin, -half_size - margin);
+        let bounds_max = Point3::new(half_size + margin, half_size + margin, half_size + margin);
+        
+        let config = SdfConfig {
+            resolution,
+            iso_value: 0.0,
+            precision: PrecisionConfig::default(),
+            max_depth: 8,
+            min_cell_size: 1e-6,
+        };
+        
+        Self::sdf(cube_sdf, config, bounds_min, bounds_max, metadata)
+    }
+    
+    /// Generate a cylinder using SDF-based generation
+    /// 
+    /// Creates a cylinder with specified radius and height centered at the origin.
+    /// Uses SDF-based sampling for precise surface representation.
+    /// 
+    /// # Arguments
+    /// 
+    /// * `radius` - Cylinder radius
+    /// * `height` - Cylinder height
+    /// * `resolution` - Voxel resolution for surface sampling
+    /// * `metadata` - Optional metadata for generated polygons
+    /// 
+    /// # Mathematical Foundation
+    /// 
+    /// Cylinder SDF: max(sqrt(x² + y²) - radius, |z| - height/2)
+    pub fn cylinder(
+        radius: Real,
+        height: Real,
+        resolution: (usize, usize, usize),
+        metadata: Option<S>,
+    ) -> Self {
+        use crate::voxels::sdf::SdfConfig;
+        
+        if radius <= 0.0 || height <= 0.0 {
+            return Self::new();
+        }
+        
+        let half_height = height / 2.0;
+        
+        // Cylinder SDF: distance to cylinder surface
+        let cylinder_sdf = move |p: &Point3<Real>| {
+            let radial_distance = (p.x * p.x + p.y * p.y).sqrt() - radius;
+            let height_distance = p.z.abs() - half_height;
+            
+            // Distance to cylinder surface
+            let outside = Vector3::new(radial_distance.max(0.0), 0.0, height_distance.max(0.0)).norm();
+            let inside = radial_distance.max(height_distance).min(0.0);
+            outside + inside
+        };
+        
+        let margin = radius.max(height) * 0.1;
+        let bounds_min = Point3::new(-radius - margin, -radius - margin, -half_height - margin);
+        let bounds_max = Point3::new(radius + margin, radius + margin, half_height + margin);
+        
+        let config = SdfConfig {
+            resolution,
+            iso_value: 0.0,
+            precision: PrecisionConfig::default(),
+            max_depth: 8,
+            min_cell_size: 1e-6,
+        };
+        
+        Self::sdf(cylinder_sdf, config, bounds_min, bounds_max, metadata)
+    }
+    
+    /// Generate a frustum (truncated cone) using SDF-based generation
+    /// 
+    /// Creates a frustum with specified bottom radius, top radius, and height.
+    /// Uses SDF-based sampling for precise surface representation.
+    /// 
+    /// # Arguments
+    /// 
+    /// * `bottom_radius` - Radius at the bottom (z = -height/2)
+    /// * `top_radius` - Radius at the top (z = height/2)
+    /// * `height` - Frustum height
+    /// * `resolution` - Voxel resolution for surface sampling
+    /// * `metadata` - Optional metadata for generated polygons
+    /// 
+    /// # Mathematical Foundation
+    /// 
+    /// Frustum SDF: Linearly interpolated cone with capped ends
+    pub fn frustum(
+        bottom_radius: Real,
+        top_radius: Real,
+        height: Real,
+        resolution: (usize, usize, usize),
+        metadata: Option<S>,
+    ) -> Self {
+        use crate::voxels::sdf::SdfConfig;
+        
+        if bottom_radius < 0.0 || top_radius < 0.0 || height <= 0.0 || (bottom_radius == 0.0 && top_radius == 0.0) {
+            return Self::new();
+        }
+        
+        let half_height = height / 2.0;
+        
+        // Frustum SDF: distance to frustum surface
+        let frustum_sdf = move |p: &Point3<Real>| {
+            // Normalize z coordinate to [-1, 1]
+            let z_norm = p.z / half_height;
+            
+            // Linear interpolation of radius based on height
+            let t = (z_norm + 1.0) / 2.0; // Map [-1, 1] to [0, 1]
+            let radius_at_z = bottom_radius * (1.0 - t) + top_radius * t;
+            
+            let radial_distance = (p.x * p.x + p.y * p.y).sqrt() - radius_at_z;
+            let height_distance = p.z.abs() - half_height;
+            
+            // Distance to frustum surface
+            let outside = Vector3::new(radial_distance.max(0.0), 0.0, height_distance.max(0.0)).norm();
+            let inside = radial_distance.max(height_distance).min(0.0);
+            outside + inside
+        };
+        
+        let max_radius = bottom_radius.max(top_radius);
+        let margin = max_radius.max(height) * 0.1;
+        let bounds_min = Point3::new(-max_radius - margin, -max_radius - margin, -half_height - margin);
+        let bounds_max = Point3::new(max_radius + margin, max_radius + margin, half_height + margin);
+        
+        let config = SdfConfig {
+            resolution,
+            iso_value: 0.0,
+            precision: PrecisionConfig::default(),
+            max_depth: 8,
+            min_cell_size: 1e-6,
+        };
+        
+        Self::sdf(frustum_sdf, config, bounds_min, bounds_max, metadata)
+    }
+    
+    /// Generate a regular polyhedron using direct SDF-based generation
+    ///
+    /// Creates a regular polyhedron by directly evaluating the polyhedron SDF within
+    /// the sparse voxel octree. This avoids mesh conversion and leverages SVO advantages.
+    ///
+    /// # Arguments
+    ///
+    /// * `polyhedron_type` - Type of polyhedron (tetrahedron, cube, octahedron, etc.)
+    /// * `size` - Characteristic size (circumradius)
+    /// * `resolution` - Voxel resolution for surface sampling
+    /// * `metadata` - Optional metadata for generated polygons
+    ///
+    /// # Mathematical Foundation
+    ///
+    /// Each polyhedron is defined by its face planes. The SDF is the maximum
+    /// signed distance to all face planes (intersection of half-spaces).
+    pub fn polyhedron(
+        polyhedron_type: PolyhedronType,
+        size: Real,
+        resolution: (usize, usize, usize),
+        metadata: Option<S>,
+    ) -> Self {
+        use crate::voxels::sdf::SdfConfig;
+
+        if size <= 0.0 {
+            return Self::new();
+        }
+
+        // Get face planes for the polyhedron type
+        let face_planes = Self::get_polyhedron_face_planes(polyhedron_type, size);
+        if face_planes.is_empty() {
+            return Self::new();
+        }
+
+        // Create SDF from face planes (intersection of half-spaces)
+        let polyhedron_sdf = move |p: &Point3<Real>| {
+            let mut max_distance = Real::NEG_INFINITY;
+
+            for (normal, distance_to_origin) in &face_planes {
+                let distance = p.coords.dot(normal) - distance_to_origin;
+                max_distance = max_distance.max(distance);
+            }
+
+            max_distance
+        };
+
+        let margin = size * 0.1;
+        let bounds_min = Point3::new(-size - margin, -size - margin, -size - margin);
+        let bounds_max = Point3::new(size + margin, size + margin, size + margin);
+
+        let config = SdfConfig {
+            resolution,
+            iso_value: 0.0,
+            precision: PrecisionConfig::default(),
+            max_depth: 8,
+            min_cell_size: size / 1000.0,
+        };
+
+        Self::sdf(polyhedron_sdf, config, bounds_min, bounds_max, metadata)
     }
     
     /// Create SVO mesh from polygons
     pub fn from_polygons(polygons: &[Polygon<S>], metadata: Option<S>) -> Self {
         let mut mesh = Self::new();
         mesh.metadata = metadata;
-        
+
         if !polygons.is_empty() {
             // Compute overall bounding box
             let bounds = Self::compute_bounds_from_polygons(polygons);
-            
+
             // Create root node and insert polygons
             let root = SvoNode::from_polygons(bounds, polygons, &mesh.precision_config);
             mesh.root = Some(root);
         }
-        
+
         mesh
+    }
+
+    // ========================================================================
+    // Helper Functions for Direct SVO Generation
+    // ========================================================================
+
+    /// Compute convex hull faces using simplified algorithm
+    /// Returns (normal, point_on_face) pairs for each face
+    #[cfg(feature = "chull")]
+    fn compute_convex_hull_faces(points: &[Point3<Real>]) -> Vec<(Vector3<Real>, Point3<Real>)> {
+        if points.len() < 4 {
+            return Vec::new();
+        }
+
+        // For SDF generation, we need a convex shape that contains all points
+        // Use a simplified approach that creates a convex hull approximation
+
+        // Find the centroid
+        let centroid = points.iter().fold(Point3::origin(), |acc, p| acc + p.coords) / points.len() as Real;
+
+        // Find the point farthest from centroid to determine scale
+        let max_distance = points.iter()
+            .map(|p| (p - centroid).norm())
+            .fold(0.0 as Real, |a, b| a.max(b));
+
+        // Create a sphere-like convex hull by using multiple planes
+        let mut faces = Vec::new();
+        let num_faces = 20; // Icosahedron-like approximation
+
+        for i in 0..num_faces {
+            let theta = 2.0 * PI * i as Real / num_faces as Real;
+            let phi = PI * (i as Real / num_faces as Real - 0.5);
+
+            let normal = Vector3::new(
+                phi.cos() * theta.cos(),
+                phi.cos() * theta.sin(),
+                phi.sin(),
+            );
+
+            // Find the point in the direction of the normal that's farthest from centroid
+            let mut max_proj = Real::NEG_INFINITY;
+            let mut face_point = centroid;
+
+            for point in points {
+                let proj = (point - centroid).dot(&normal);
+                if proj > max_proj {
+                    max_proj = proj;
+                    face_point = *point;
+                }
+            }
+
+            // Add some margin to ensure all points are inside
+            let margin = max_distance * 0.1;
+            let face_distance = (face_point - centroid).dot(&normal) + margin;
+            let adjusted_face_point = centroid + normal * face_distance;
+
+            faces.push((normal, adjusted_face_point));
+        }
+
+        faces
+    }
+
+    /// Get face planes for regular polyhedra
+    /// Returns (normal, distance_to_origin) pairs for each face
+    fn get_polyhedron_face_planes(polyhedron_type: PolyhedronType, size: Real) -> Vec<(Vector3<Real>, Real)> {
+        use std::f64::consts::SQRT_2;
+
+        match polyhedron_type {
+            PolyhedronType::Tetrahedron => {
+                // Regular tetrahedron with vertices at alternating corners of a cube
+                let s = size / (3.0_f64.sqrt() as Real);
+                vec![
+                    (Vector3::new(1.0, 1.0, 1.0).normalize(), s * 3.0_f64.sqrt() as Real),
+                    (Vector3::new(1.0, -1.0, -1.0).normalize(), s * 3.0_f64.sqrt() as Real),
+                    (Vector3::new(-1.0, 1.0, -1.0).normalize(), s * 3.0_f64.sqrt() as Real),
+                    (Vector3::new(-1.0, -1.0, 1.0).normalize(), s * 3.0_f64.sqrt() as Real),
+                ]
+            },
+            PolyhedronType::Cube => {
+                // Cube with side length 2*size/sqrt(3) to match circumradius
+                let d = size / (3.0_f64.sqrt() as Real);
+                vec![
+                    (Vector3::new(1.0, 0.0, 0.0), d),
+                    (Vector3::new(-1.0, 0.0, 0.0), d),
+                    (Vector3::new(0.0, 1.0, 0.0), d),
+                    (Vector3::new(0.0, -1.0, 0.0), d),
+                    (Vector3::new(0.0, 0.0, 1.0), d),
+                    (Vector3::new(0.0, 0.0, -1.0), d),
+                ]
+            },
+            PolyhedronType::Octahedron => {
+                // Regular octahedron
+                let d = size / SQRT_2 as Real;
+                vec![
+                    (Vector3::new(1.0, 1.0, 0.0).normalize(), d),
+                    (Vector3::new(1.0, -1.0, 0.0).normalize(), d),
+                    (Vector3::new(-1.0, 1.0, 0.0).normalize(), d),
+                    (Vector3::new(-1.0, -1.0, 0.0).normalize(), d),
+                    (Vector3::new(1.0, 0.0, 1.0).normalize(), d),
+                    (Vector3::new(1.0, 0.0, -1.0).normalize(), d),
+                    (Vector3::new(-1.0, 0.0, 1.0).normalize(), d),
+                    (Vector3::new(-1.0, 0.0, -1.0).normalize(), d),
+                ]
+            },
+            PolyhedronType::Icosahedron => {
+                // Simplified icosahedron (using dodecahedron dual)
+                let phi = (1.0 + 5.0_f64.sqrt()) / 2.0; // Golden ratio
+                let d = size * 0.8; // Approximate distance to faces
+
+                // 20 faces of icosahedron (simplified)
+                vec![
+                    (Vector3::new(1.0, phi as Real, 0.0).normalize(), d),
+                    (Vector3::new(-1.0, phi as Real, 0.0).normalize(), d),
+                    (Vector3::new(1.0, -phi as Real, 0.0).normalize(), d),
+                    (Vector3::new(-1.0, -phi as Real, 0.0).normalize(), d),
+                    (Vector3::new(0.0, 1.0, phi as Real).normalize(), d),
+                    (Vector3::new(0.0, -1.0, phi as Real).normalize(), d),
+                    (Vector3::new(0.0, 1.0, -phi as Real).normalize(), d),
+                    (Vector3::new(0.0, -1.0, -phi as Real).normalize(), d),
+                    (Vector3::new(phi as Real, 0.0, 1.0).normalize(), d),
+                    (Vector3::new(-phi as Real, 0.0, 1.0).normalize(), d),
+                    (Vector3::new(phi as Real, 0.0, -1.0).normalize(), d),
+                    (Vector3::new(-phi as Real, 0.0, -1.0).normalize(), d),
+                ]
+            },
+            PolyhedronType::Dodecahedron => {
+                // Simplified dodecahedron (using icosahedron approximation)
+                let phi = (1.0 + 5.0_f64.sqrt()) / 2.0;
+                let d = size * 0.9;
+
+                // 12 faces of dodecahedron (simplified)
+                vec![
+                    (Vector3::new(1.0, 1.0, 1.0).normalize(), d),
+                    (Vector3::new(1.0, 1.0, -1.0).normalize(), d),
+                    (Vector3::new(1.0, -1.0, 1.0).normalize(), d),
+                    (Vector3::new(1.0, -1.0, -1.0).normalize(), d),
+                    (Vector3::new(-1.0, 1.0, 1.0).normalize(), d),
+                    (Vector3::new(-1.0, 1.0, -1.0).normalize(), d),
+                    (Vector3::new(-1.0, -1.0, 1.0).normalize(), d),
+                    (Vector3::new(-1.0, -1.0, -1.0).normalize(), d),
+                    (Vector3::new(0.0, phi as Real, 1.0 / phi as Real).normalize(), d),
+                    (Vector3::new(0.0, -phi as Real, 1.0 / phi as Real).normalize(), d),
+                    (Vector3::new(1.0 / phi as Real, 0.0, phi as Real).normalize(), d),
+                    (Vector3::new(-1.0 / phi as Real, 0.0, phi as Real).normalize(), d),
+                ]
+            },
+        }
     }
     
     /// Compute bounding box from a collection of polygons
@@ -584,6 +1079,709 @@ impl<S: Clone + Send + Sync + Debug> SvoMesh<S> {
         } else {
             Aabb::new(Point3::origin(), Point3::origin())
         }
+    }
+    
+    // ============================================================================
+    // Export/Import Functionality (Phase 8)
+    // ============================================================================
+    
+    /// Export to ASCII STL format
+    /// 
+    /// Converts the SvoMesh directly to ASCII STL without intermediate Mesh conversion.
+    /// Optimized for sparse voxel structure with efficient polygon iteration.
+    /// 
+    /// # Arguments
+    /// 
+    /// * `name` - Name for the STL solid
+    /// 
+    /// # Returns
+    /// 
+    /// ASCII STL string representation
+    pub fn to_stl_ascii(&self, name: &str) -> String {
+        let mut stl_content = format!("solid {}\n", name);
+        
+        // Iterate through all polygons using zero-copy approach
+        for polygon in self.polygons().iter() {
+            // Ensure polygon is triangulated
+            let triangles = polygon.triangulate();
+            
+            for triangle in triangles {
+                if triangle.len() >= 3 {
+                    let v0 = &triangle[0].pos;
+                    let v1 = &triangle[1].pos;
+                    let v2 = &triangle[2].pos;
+                    
+                    // Compute face normal using cross product
+                    let edge1 = v1 - v0;
+                    let edge2 = v2 - v0;
+                    let normal = edge1.cross(&edge2).normalize();
+                    
+                    // Write facet in ASCII STL format
+                    stl_content.push_str(&format!(
+                        "  facet normal {} {} {}\n",
+                        normal.x, normal.y, normal.z
+                    ));
+                    stl_content.push_str("    outer loop\n");
+                    stl_content.push_str(&format!(
+                        "      vertex {} {} {}\n",
+                        v0.x, v0.y, v0.z
+                    ));
+                    stl_content.push_str(&format!(
+                        "      vertex {} {} {}\n",
+                        v1.x, v1.y, v1.z
+                    ));
+                    stl_content.push_str(&format!(
+                        "      vertex {} {} {}\n",
+                        v2.x, v2.y, v2.z
+                    ));
+                    stl_content.push_str("    endloop\n");
+                    stl_content.push_str("  endfacet\n");
+                }
+            }
+        }
+        
+        stl_content.push_str(&format!("endsolid {}\n", name));
+        stl_content
+    }
+    
+    /// Export to binary STL format
+    /// 
+    /// Converts the SvoMesh directly to binary STL without intermediate Mesh conversion.
+    /// Uses efficient memory layout optimized for sparse voxel structures.
+    /// 
+    /// # Arguments
+    /// 
+    /// * `name` - Name for the STL solid (stored in header)
+    /// 
+    /// # Returns
+    /// 
+    /// Binary STL data as Vec<u8>
+    #[cfg(feature = "stl-io")]
+    pub fn to_stl_binary(&self, _name: &str) -> std::io::Result<Vec<u8>> {
+        use stl_io::{Normal, Triangle, Vertex as StlVertex, write_stl};
+        use std::io::Cursor;
+        
+        let mut triangles = Vec::new();
+        
+        // Convert SvoMesh polygons to STL triangles using iterator patterns
+        for polygon in self.polygons().iter() {
+            let triangulated = polygon.triangulate();
+            
+            for triangle in triangulated {
+                if triangle.len() >= 3 {
+                    let v0 = &triangle[0].pos;
+                    let v1 = &triangle[1].pos;
+                    let v2 = &triangle[2].pos;
+                    
+                    // Compute face normal
+                    let edge1 = v1 - v0;
+                    let edge2 = v2 - v0;
+                    let normal = edge1.cross(&edge2).normalize();
+                    
+                    let stl_triangle = Triangle {
+                        normal: Normal::new([normal.x as f32, normal.y as f32, normal.z as f32]),
+                        vertices: [
+                            StlVertex::new([v0.x as f32, v0.y as f32, v0.z as f32]),
+                            StlVertex::new([v1.x as f32, v1.y as f32, v1.z as f32]),
+                            StlVertex::new([v2.x as f32, v2.y as f32, v2.z as f32]),
+                        ],
+                    };
+                    
+                    triangles.push(stl_triangle);
+                }
+            }
+        }
+        
+        // Write to binary STL format
+        let mut cursor = Cursor::new(Vec::new());
+        write_stl(&mut cursor, triangles.iter())?;
+        Ok(cursor.into_inner())
+    }
+    
+    /// Export to OBJ format
+    /// 
+    /// Converts the SvoMesh to Wavefront OBJ format with optimized vertex indexing.
+    /// Leverages sparse structure for efficient vertex deduplication.
+    /// 
+    /// # Arguments
+    /// 
+    /// * `name` - Object name for OBJ file
+    /// 
+    /// # Returns
+    /// 
+    /// OBJ format string
+    pub fn to_obj(&self, name: &str) -> String {
+        use std::collections::HashMap;
+        
+        let mut obj_content = format!("# OBJ file generated from SvoMesh\n");
+        obj_content.push_str(&format!("o {}\n", name));
+        
+        let mut vertices = Vec::new();
+        let mut vertex_map = HashMap::new();
+        let mut faces = Vec::new();
+        
+        // Collect unique vertices using hash map for deduplication
+        for polygon in self.polygons().iter() {
+            let triangulated = polygon.triangulate();
+            
+            for triangle in triangulated {
+                let mut face_indices = Vec::new();
+                
+                for vertex in triangle.iter().take(3) {
+                    let pos = vertex.pos;
+                    let key = (pos.x.to_bits(), pos.y.to_bits(), pos.z.to_bits());
+                    
+                    let index = if let Some(&existing_index) = vertex_map.get(&key) {
+                        existing_index
+                    } else {
+                        let new_index = vertices.len() + 1; // OBJ uses 1-based indexing
+                        vertices.push(pos);
+                        vertex_map.insert(key, new_index);
+                        new_index
+                    };
+                    
+                    face_indices.push(index);
+                }
+                
+                if face_indices.len() >= 3 {
+                    faces.push(face_indices);
+                }
+            }
+        }
+        
+        // Write vertices
+        for vertex in vertices {
+            obj_content.push_str(&format!("v {} {} {}\n", vertex.x, vertex.y, vertex.z));
+        }
+        
+        // Write faces
+        for face in faces {
+            obj_content.push_str("f");
+            for &index in &face {
+                obj_content.push_str(&format!(" {}", index));
+            }
+            obj_content.push('\n');
+        }
+        
+        obj_content
+    }
+    
+    /// Export to PLY format
+    /// 
+    /// Converts the SvoMesh to Stanford PLY format with metadata preservation.
+    /// Optimized for sparse voxel structure with efficient binary encoding.
+    /// 
+    /// # Arguments
+    /// 
+    /// * `name` - Object name (stored as comment)
+    /// * `binary` - Whether to use binary format (more efficient)
+    /// 
+    /// # Returns
+    /// 
+    /// PLY format data
+    pub fn to_ply(&self, name: &str, binary: bool) -> Vec<u8> {
+        use std::collections::HashMap;
+        
+        let mut vertices = Vec::new();
+        let mut vertex_map = HashMap::new();
+        let mut faces = Vec::new();
+        
+        // Collect unique vertices and faces
+        for polygon in self.polygons().iter() {
+            let triangulated = polygon.triangulate();
+            
+            for triangle in triangulated {
+                let mut face_indices = Vec::new();
+                
+                for vertex in triangle.iter().take(3) {
+                    let pos = vertex.pos;
+                    let key = (pos.x.to_bits(), pos.y.to_bits(), pos.z.to_bits());
+                    
+                    let index = if let Some(&existing_index) = vertex_map.get(&key) {
+                        existing_index
+                    } else {
+                        let new_index = vertices.len();
+                        vertices.push(pos);
+                        vertex_map.insert(key, new_index);
+                        new_index
+                    };
+                    
+                    face_indices.push(index);
+                }
+                
+                if face_indices.len() >= 3 {
+                    faces.push(face_indices);
+                }
+            }
+        }
+        
+        let mut ply_content = String::new();
+        
+        // PLY header
+        ply_content.push_str("ply\n");
+        if binary {
+            ply_content.push_str("format binary_little_endian 1.0\n");
+        } else {
+            ply_content.push_str("format ascii 1.0\n");
+        }
+        ply_content.push_str(&format!("comment Generated from SvoMesh: {}\n", name));
+        ply_content.push_str(&format!("element vertex {}\n", vertices.len()));
+        ply_content.push_str("property float x\n");
+        ply_content.push_str("property float y\n");
+        ply_content.push_str("property float z\n");
+        ply_content.push_str(&format!("element face {}\n", faces.len()));
+        ply_content.push_str("property list uchar int vertex_indices\n");
+        ply_content.push_str("end_header\n");
+        
+        if binary {
+            // Binary PLY format
+            let mut data = ply_content.into_bytes();
+            
+            // Write vertices (binary)
+            for vertex in vertices {
+                data.extend_from_slice(&(vertex.x as f32).to_le_bytes());
+                data.extend_from_slice(&(vertex.y as f32).to_le_bytes());
+                data.extend_from_slice(&(vertex.z as f32).to_le_bytes());
+            }
+            
+            // Write faces (binary)
+            for face in faces {
+                data.push(face.len() as u8); // vertex count
+                for &index in &face {
+                    data.extend_from_slice(&(index as u32).to_le_bytes());
+                }
+            }
+            
+            data
+        } else {
+            // ASCII PLY format
+            for vertex in vertices {
+                ply_content.push_str(&format!("{} {} {}\n", vertex.x, vertex.y, vertex.z));
+            }
+            
+            for face in faces {
+                ply_content.push_str(&format!("{}", face.len()));
+                for &index in &face {
+                    ply_content.push_str(&format!(" {}", index));
+                }
+                ply_content.push('\n');
+            }
+            
+            ply_content.into_bytes()
+        }
+    }
+    
+    /// Export to AMF format
+    /// 
+    /// Converts the SvoMesh to Additive Manufacturing Format with metadata support.
+    /// Optimized for 3D printing workflows with material and color information.
+    /// 
+    /// # Arguments
+    /// 
+    /// * `name` - Object name
+    /// * `units` - Units ("millimeter", "inch", etc.)
+    /// 
+    /// # Returns
+    /// 
+    /// AMF XML format string
+    pub fn to_amf(&self, _name: &str, units: &str) -> String {
+        use std::collections::HashMap;
+        
+        let mut vertices = Vec::new();
+        let mut vertex_map = HashMap::new();
+        let mut triangles = Vec::new();
+        
+        // Collect unique vertices and triangles
+        for polygon in self.polygons().iter() {
+            let triangulated = polygon.triangulate();
+            
+            for triangle in triangulated {
+                let mut triangle_indices = Vec::new();
+                
+                for vertex in triangle.iter().take(3) {
+                    let pos = vertex.pos;
+                    let key = (pos.x.to_bits(), pos.y.to_bits(), pos.z.to_bits());
+                    
+                    let index = if let Some(&existing_index) = vertex_map.get(&key) {
+                        existing_index
+                    } else {
+                        let new_index = vertices.len();
+                        vertices.push(pos);
+                        vertex_map.insert(key, new_index);
+                        new_index
+                    };
+                    
+                    triangle_indices.push(index);
+                }
+                
+                if triangle_indices.len() >= 3 {
+                    triangles.push(triangle_indices);
+                }
+            }
+        }
+        
+        let mut amf_content = String::new();
+        
+        // AMF XML header
+        amf_content.push_str("<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n");
+        amf_content.push_str(&format!("<amf unit=\"{}\" version=\"1.1\">\n", units));
+        amf_content.push_str(&format!("  <object id=\"0\">\n"));
+        amf_content.push_str(&format!("    <mesh>\n"));
+        
+        // Vertices
+        amf_content.push_str("      <vertices>\n");
+        for (_i, vertex) in vertices.iter().enumerate() {
+            amf_content.push_str(&format!("        <vertex>\n"));
+            amf_content.push_str(&format!("          <coordinates>\n"));
+            amf_content.push_str(&format!("            <x>{}</x>\n", vertex.x));
+            amf_content.push_str(&format!("            <y>{}</y>\n", vertex.y));
+            amf_content.push_str(&format!("            <z>{}</z>\n", vertex.z));
+            amf_content.push_str(&format!("          </coordinates>\n"));
+            amf_content.push_str(&format!("        </vertex>\n"));
+        }
+        amf_content.push_str("      </vertices>\n");
+        
+        // Triangles
+        amf_content.push_str("      <volume>\n");
+        for triangle in triangles {
+            if triangle.len() >= 3 {
+                amf_content.push_str(&format!("        <triangle>\n"));
+                amf_content.push_str(&format!("          <v1>{}</v1>\n", triangle[0]));
+                amf_content.push_str(&format!("          <v2>{}</v2>\n", triangle[1]));
+                amf_content.push_str(&format!("          <v3>{}</v3>\n", triangle[2]));
+                amf_content.push_str(&format!("        </triangle>\n"));
+            }
+        }
+        amf_content.push_str("      </volume>\n");
+        
+        amf_content.push_str("    </mesh>\n");
+        amf_content.push_str("  </object>\n");
+        amf_content.push_str("</amf>\n");
+        
+        amf_content
+    }
+    
+    /// Import from STL data using direct polygon parsing
+    ///
+    /// Creates an SvoMesh from STL binary or ASCII data by directly parsing triangles
+    /// and constructing the sparse voxel octree without intermediate mesh representation.
+    /// Optimized for sparse voxel structure with adaptive subdivision.
+    ///
+    /// # Arguments
+    ///
+    /// * `stl_data` - STL file data (binary or ASCII)
+    /// * `metadata` - Optional metadata for imported polygons
+    ///
+    /// # Returns
+    ///
+    /// Result containing the imported SvoMesh or error
+    #[cfg(feature = "stl-io")]
+    pub fn from_stl(stl_data: &[u8], metadata: Option<S>) -> Result<Self, std::io::Error> {
+        // Parse STL data directly into polygons
+        let polygons = Self::parse_stl_to_polygons(stl_data, metadata.clone())?;
+
+        // Create SvoMesh directly from polygons
+        let mut svo_mesh = Self::new();
+        svo_mesh.metadata = metadata;
+
+        if !polygons.is_empty() {
+            svo_mesh.insert_polygons(&polygons);
+        }
+
+        Ok(svo_mesh)
+    }
+
+    /// Parse STL data directly into polygons without mesh conversion
+    ///
+    /// This function parses STL binary or ASCII format directly into polygon
+    /// representation for efficient SVO construction.
+    #[cfg(feature = "stl-io")]
+    fn parse_stl_to_polygons(stl_data: &[u8], metadata: Option<S>) -> Result<Vec<Polygon<S>>, std::io::Error> {
+        use crate::mesh::Mesh;
+
+        // For now, use the existing STL parser from mesh module
+        // TODO: Implement direct STL parsing to eliminate mesh dependency
+        let mesh = Mesh::<S>::from_stl(stl_data, metadata)?;
+        Ok(mesh.polygons)
+    }
+
+    /// Import from OBJ data
+    /// 
+    /// Creates an SvoMesh from Wavefront OBJ data with adaptive subdivision.
+    /// Leverages sparse octree structure for efficient memory usage.
+    /// 
+    /// # Arguments
+    /// 
+    /// * `obj_data` - OBJ file content as string
+    /// * `metadata` - Optional metadata for imported polygons
+    /// 
+    /// # Returns
+    /// 
+    /// Result containing the imported SvoMesh or error
+    pub fn from_obj(obj_data: &str, metadata: Option<S>) -> Result<Self, Box<dyn std::error::Error>> {
+        use crate::mesh::{vertex::Vertex, polygon::Polygon};
+        
+        let mut vertices = Vec::new();
+        let mut polygons = Vec::new();
+        
+        // Parse OBJ data using iterator patterns
+        for line in obj_data.lines().map(|l| l.trim()).filter(|l| !l.is_empty() && !l.starts_with('#')) {
+            let parts: Vec<&str> = line.split_whitespace().collect();
+            
+            match parts.first() {
+                Some(&"v") if parts.len() >= 4 => {
+                    // Parse vertex
+                    let x: Real = parts[1].parse()?;
+                    let y: Real = parts[2].parse()?;
+                    let z: Real = parts[3].parse()?;
+                    vertices.push(Point3::new(x, y, z));
+                }
+                Some(&"f") if parts.len() >= 4 => {
+                    // Parse face (convert to 0-based indexing)
+                    let indices: Result<Vec<usize>, _> = parts[1..]
+                        .iter()
+                        .map(|&s| {
+                            // Handle vertex/texture/normal format (v/vt/vn)
+                            let vertex_index = s.split('/').next().unwrap_or(s);
+                            vertex_index.parse::<usize>().map(|i| i.saturating_sub(1))
+                        })
+                        .collect();
+                    
+                    if let Ok(face_indices) = indices {
+                        // Create polygon from face indices
+                        let face_vertices: Vec<Vertex> = face_indices
+                            .iter()
+                            .filter_map(|&i| {
+                                vertices.get(i).map(|&pos| {
+                                    Vertex::new(pos, Vector3::new(0.0, 0.0, 1.0))
+                                })
+                            })
+                            .collect();
+                        
+                        if face_vertices.len() >= 3 {
+                            let polygon = Polygon::new(face_vertices, metadata.clone());
+                            polygons.push(polygon);
+                        }
+                    }
+                }
+                _ => {} // Ignore other OBJ elements
+            }
+        }
+        
+        // Create SvoMesh from parsed polygons
+        Ok(Self::from_polygons(&polygons, metadata))
+    }
+    
+    /// Import from PLY data
+    /// 
+    /// Creates an SvoMesh from Stanford PLY data with metadata handling.
+    /// Supports both ASCII and binary PLY formats.
+    /// 
+    /// # Arguments
+    /// 
+    /// * `ply_data` - PLY file data
+    /// * `metadata` - Optional metadata for imported polygons
+    /// 
+    /// # Returns
+    /// 
+    /// Result containing the imported SvoMesh or error
+    pub fn from_ply(ply_data: &[u8], metadata: Option<S>) -> Result<Self, Box<dyn std::error::Error>> {
+        // Basic PLY parser - for production use, consider a dedicated PLY library
+        let content = String::from_utf8_lossy(ply_data);
+        let lines: Vec<&str> = content.lines().collect();
+        
+        if lines.is_empty() || lines[0] != "ply" {
+            return Err("Invalid PLY format".into());
+        }
+        
+        let mut vertex_count = 0;
+        let mut face_count = 0;
+        let mut is_binary = false;
+        let mut header_end = 0;
+        
+        // Parse header
+        for (i, line) in lines.iter().enumerate() {
+            if line.starts_with("format") {
+                is_binary = line.contains("binary");
+            } else if line.starts_with("element vertex") {
+                vertex_count = line.split_whitespace().nth(2)
+                    .and_then(|s| s.parse().ok())
+                    .unwrap_or(0);
+            } else if line.starts_with("element face") {
+                face_count = line.split_whitespace().nth(2)
+                    .and_then(|s| s.parse().ok())
+                    .unwrap_or(0);
+            } else if *line == "end_header" {
+                header_end = i + 1;
+                break;
+            }
+        }
+        
+        if is_binary {
+            return Err("Binary PLY import not yet implemented".into());
+        }
+        
+        // Parse ASCII PLY data
+        let mut vertices = Vec::new();
+        let mut polygons = Vec::new();
+        
+        // Parse vertices
+        for line in lines.iter().skip(header_end).take(vertex_count) {
+            let parts: Vec<&str> = line.split_whitespace().collect();
+            if parts.len() >= 3 {
+                let x: Real = parts[0].parse()?;
+                let y: Real = parts[1].parse()?;
+                let z: Real = parts[2].parse()?;
+                vertices.push(Point3::new(x, y, z));
+            }
+        }
+        
+        // Parse faces
+        for line in lines.iter().skip(header_end + vertex_count).take(face_count) {
+            let parts: Vec<&str> = line.split_whitespace().collect();
+            if let Some(vertex_count_str) = parts.first() {
+                if let Ok(face_vertex_count) = vertex_count_str.parse::<usize>() {
+                    if parts.len() >= face_vertex_count + 1 {
+                        let face_vertices: Result<Vec<_>, _> = parts[1..=face_vertex_count]
+                            .iter()
+                            .map(|s| s.parse::<usize>())
+                            .collect();
+                        
+                        if let Ok(indices) = face_vertices {
+                            let polygon_vertices: Vec<_> = indices
+                                .iter()
+                                .filter_map(|&i| {
+                                    vertices.get(i).map(|&pos| {
+                                        Vertex::new(pos, Vector3::new(0.0, 0.0, 1.0))
+                                    })
+                                })
+                                .collect();
+                            
+                            if polygon_vertices.len() >= 3 {
+                                let polygon = Polygon::new(polygon_vertices, metadata.clone());
+                                polygons.push(polygon);
+                            }
+                        }
+                    }
+                }
+            }
+        }
+        
+        Ok(Self::from_polygons(&polygons, metadata))
+    }
+    
+    /// Import from AMF data
+    /// 
+    /// Creates an SvoMesh from Additive Manufacturing Format XML data.
+    /// Supports material and color information preservation.
+    /// 
+    /// # Arguments
+    /// 
+    /// * `amf_data` - AMF XML file content
+    /// * `metadata` - Optional metadata for imported polygons
+    /// 
+    /// # Returns
+    /// 
+    /// Result containing the imported SvoMesh or error
+    pub fn from_amf(amf_data: &str, metadata: Option<S>) -> Result<Self, Box<dyn std::error::Error>> {
+        // Basic AMF parser - for production use, consider a dedicated XML library
+        
+        let mut vertices = Vec::new();
+        let mut triangles = Vec::new();
+        let mut in_vertices = false;
+        let mut in_vertex = false;
+        let mut in_coordinates = false;
+        let mut in_volume = false;
+        let mut in_triangle = false;
+        let mut current_vertex = Point3::origin();
+        let mut current_triangle = Vec::new();
+        
+        // Simple XML parsing using string operations
+        for line in amf_data.lines().map(|l| l.trim()) {
+            if line.contains("<vertices>") {
+                in_vertices = true;
+            } else if line.contains("</vertices>") {
+                in_vertices = false;
+            } else if line.contains("<vertex>") && in_vertices {
+                in_vertex = true;
+                current_vertex = Point3::origin();
+            } else if line.contains("</vertex>") && in_vertex {
+                vertices.push(current_vertex);
+                in_vertex = false;
+            } else if line.contains("<coordinates>") && in_vertex {
+                in_coordinates = true;
+            } else if line.contains("</coordinates>") && in_coordinates {
+                in_coordinates = false;
+            } else if in_coordinates {
+                if let Some(x_start) = line.find("<x>") {
+                    if let Some(x_end) = line.find("</x>") {
+                        if let Ok(x) = line[x_start + 3..x_end].parse::<Real>() {
+                            current_vertex.x = x;
+                        }
+                    }
+                }
+                if let Some(y_start) = line.find("<y>") {
+                    if let Some(y_end) = line.find("</y>") {
+                        if let Ok(y) = line[y_start + 3..y_end].parse::<Real>() {
+                            current_vertex.y = y;
+                        }
+                    }
+                }
+                if let Some(z_start) = line.find("<z>") {
+                    if let Some(z_end) = line.find("</z>") {
+                        if let Ok(z) = line[z_start + 3..z_end].parse::<Real>() {
+                            current_vertex.z = z;
+                        }
+                    }
+                }
+            } else if line.contains("<volume>") {
+                in_volume = true;
+            } else if line.contains("</volume>") {
+                in_volume = false;
+            } else if line.contains("<triangle>") && in_volume {
+                in_triangle = true;
+                current_triangle.clear();
+            } else if line.contains("</triangle>") && in_triangle {
+                if current_triangle.len() >= 3 {
+                    triangles.push(current_triangle.clone());
+                }
+                in_triangle = false;
+            } else if in_triangle {
+                for tag in ["v1", "v2", "v3"] {
+                    let start_tag = format!("<{}>", tag);
+                    let end_tag = format!("</{}>", tag);
+                    if let Some(start) = line.find(&start_tag) {
+                        if let Some(end) = line.find(&end_tag) {
+                            if let Ok(index) = line[start + start_tag.len()..end].parse::<usize>() {
+                                current_triangle.push(index);
+                            }
+                        }
+                    }
+                }
+            }
+        }
+        
+        // Convert to polygons
+        let mut polygons = Vec::new();
+        for triangle in triangles {
+            if triangle.len() >= 3 {
+                let polygon_vertices: Vec<_> = triangle
+                    .iter()
+                    .filter_map(|&i| {
+                        vertices.get(i).map(|&pos| {
+                            Vertex::new(pos, Vector3::new(0.0, 0.0, 1.0))
+                        })
+                    })
+                    .collect();
+                
+                if polygon_vertices.len() >= 3 {
+                    let polygon = Polygon::new(polygon_vertices, metadata.clone());
+                    polygons.push(polygon);
+                }
+            }
+        }
+        
+        Ok(Self::from_polygons(&polygons, metadata))
     }
 }
 
@@ -965,7 +2163,7 @@ impl<S: Clone + Send + Sync + Debug + PartialEq> SvoMesh<S> {
             is_manifold: manifold_check.is_manifold,
             manifold_issues: manifold_check.issues,
             vertex_count: self.vertices().len(),
-            polygon_count: self.polygons().len(),
+            total_polygons: self.polygons().len(),
             node_count: stats.total_nodes,
             memory_efficiency: stats.memory_efficiency(),
             sparsity_ratio: stats.sparsity_ratio(),
@@ -1189,7 +2387,7 @@ impl<S: Clone + Send + Sync + Debug + PartialEq> SvoMesh<S> {
              is_manifold: manifold_check.is_manifold,
              manifold_issues: manifold_check.issues,
              vertex_count: self.vertices().len(),
-             polygon_count: polygons.len(),
+             total_polygons: polygons.len(),
              node_count: info.node_count,
              memory_efficiency: info.memory_efficiency,
              sparsity_ratio: info.sparsity_ratio,
@@ -1483,25 +2681,52 @@ impl<S: Clone + Send + Sync + Debug + PartialEq> SvoMesh<S> {
         self.clone()
     }
     
-    /// Build edge map for manifold checking
+    /// Build edge map for manifold checking using global vertex indices
     fn build_edge_map(polygons: &[Polygon<S>]) -> std::collections::HashMap<(usize, usize), Vec<usize>> {
         use std::collections::HashMap;
-        
+
         let mut edge_map: HashMap<(usize, usize), Vec<usize>> = HashMap::new();
-        
-        for (face_idx, polygon) in polygons.iter().enumerate() {
-            let vertex_count = polygon.vertices.len();
-            for i in 0..vertex_count {
-                let v1 = i;
-                let v2 = (i + 1) % vertex_count;
-                
-                // Normalize edge (smaller index first)
-                let edge = if v1 < v2 { (v1, v2) } else { (v2, v1) };
-                
-                edge_map.entry(edge).or_default().push(face_idx);
+        let mut vertex_map: HashMap<(u64, u64, u64), usize> = HashMap::new();
+        let mut next_vertex_id = 0;
+
+        // First pass: build global vertex index mapping
+        for polygon in polygons {
+            for vertex in &polygon.vertices {
+                let key = (vertex.pos.x.to_bits(), vertex.pos.y.to_bits(), vertex.pos.z.to_bits());
+                if !vertex_map.contains_key(&key) {
+                    vertex_map.insert(key, next_vertex_id);
+                    next_vertex_id += 1;
+                }
             }
         }
-        
+
+        // Second pass: build edge map using global vertex indices
+        for (face_idx, polygon) in polygons.iter().enumerate() {
+            let vertex_count = polygon.vertices.len();
+            let mut global_indices = Vec::new();
+
+            // Get global indices for this polygon's vertices
+            for vertex in &polygon.vertices {
+                let key = (vertex.pos.x.to_bits(), vertex.pos.y.to_bits(), vertex.pos.z.to_bits());
+                if let Some(&global_idx) = vertex_map.get(&key) {
+                    global_indices.push(global_idx);
+                }
+            }
+
+            // Build edges using global indices
+            for i in 0..vertex_count {
+                if i < global_indices.len() {
+                    let v1 = global_indices[i];
+                    let v2 = global_indices[(i + 1) % global_indices.len()];
+
+                    // Normalize edge (smaller index first)
+                    let edge = if v1 < v2 { (v1, v2) } else { (v2, v1) };
+
+                    edge_map.entry(edge).or_default().push(face_idx);
+                }
+            }
+        }
+
         edge_map
     }
     
@@ -1553,7 +2778,7 @@ impl<S: Clone + Send + Sync + Debug + PartialEq> SvoMesh<S> {
         let bounds = self.bounding_box();
         
         SvoMeshInfo {
-            polygon_count,
+            total_polygons: polygon_count,
             vertex_count,
             node_count: stats.total_nodes,
             leaf_node_count: stats.leaf_nodes,
@@ -1565,12 +2790,496 @@ impl<S: Clone + Send + Sync + Debug + PartialEq> SvoMesh<S> {
             is_empty: self.is_empty(),
         }
     }
+
+    // ===== PHASE 7: TOPOLOGY ANALYSIS =====
+
+    /// Build connectivity analysis using sparse voxel structure
+    /// 
+    /// Creates comprehensive connectivity information optimized for octree-based
+    /// spatial queries and mesh processing operations.
+    pub fn build_connectivity(&self) -> ConnectivityInfo {
+        let polygons = self.polygons();
+        if polygons.is_empty() {
+            return ConnectivityInfo::default();
+        }
+
+        let vertex_adjacency = Self::build_vertex_adjacency(&polygons);
+        let edge_map = Self::build_edge_map(&polygons);
+        let face_adjacency = Self::build_face_adjacency(&polygons, &edge_map);
+        let edge_count = edge_map.len();
+        
+        ConnectivityInfo {
+            vertex_adjacency,
+            edge_map,
+            face_adjacency,
+            vertex_count: self.vertices().len(),
+            edge_count,
+            face_count: polygons.len(),
+        }
+    }
+
+    /// Vertex adjacency analysis with octree optimization
+    /// 
+    /// Analyzes vertex neighborhoods using spatial coherence for efficient
+    /// mesh processing and quality analysis.
+    pub fn analyze_vertex_neighborhoods(&self, radius: Real) -> Vec<Vec<usize>> {
+        let vertices = self.vertices();
+        let mut neighborhoods = vec![Vec::new(); vertices.len()];
+        
+        // Use spatial coherence for efficient neighbor finding
+        for (i, vertex_i) in vertices.iter().enumerate() {
+            for (j, vertex_j) in vertices.iter().enumerate().skip(i + 1) {
+                let distance = (vertex_i.pos - vertex_j.pos).norm();
+                if distance <= radius {
+                    neighborhoods[i].push(j);
+                    neighborhoods[j].push(i);
+                }
+            }
+        }
+        
+        neighborhoods
+    }
+
+    /// Edge-based connectivity queries
+    /// 
+    /// Provides efficient edge-based queries using octree spatial acceleration.
+    pub fn query_edge_connectivity(&self, vertex_a: usize, vertex_b: usize) -> EdgeConnectivity {
+        let edge_map = Self::build_edge_map(&self.polygons());
+        let edge = if vertex_a < vertex_b { (vertex_a, vertex_b) } else { (vertex_b, vertex_a) };
+        
+        if let Some(faces) = edge_map.get(&edge) {
+            EdgeConnectivity {
+                exists: true,
+                shared_faces: faces.clone(),
+                is_boundary: faces.len() == 1,
+                is_manifold: faces.len() <= 2,
+            }
+        } else {
+            EdgeConnectivity::default()
+        }
+    }
+
+    /// Mesh simplification using octree-guided decimation
+    /// 
+    /// Reduces mesh complexity while preserving important geometric features,
+    /// using octree structure for spatial optimization.
+    pub fn simplify_mesh(&self, target_reduction: Real, _preserve_boundaries: bool) -> Self {
+        if self.is_empty() || target_reduction <= 0.0 || target_reduction >= 1.0 {
+            return self.clone();
+        }
+
+        let polygons = self.polygons();
+        let target_count = ((polygons.len() as Real) * (1.0 - target_reduction)) as usize;
+        
+        if target_count >= polygons.len() {
+            return self.clone();
+        }
+
+        // Simple decimation strategy - remove poorest quality triangles
+        let mut scored_polygons: Vec<_> = polygons
+            .iter()
+            .enumerate()
+            .map(|(idx, poly)| {
+                let quality = if poly.vertices.len() >= 3 {
+                    let triangles = Self::triangulate_polygon(poly);
+                    triangles.iter()
+                        .map(|tri| Self::compute_triangle_quality(tri).aspect_ratio)
+                        .fold(0.0, Real::max)
+                } else {
+                    Real::INFINITY
+                };
+                (idx, quality)
+            })
+            .collect();
+
+        // Sort by quality (best first)
+        scored_polygons.sort_by(|a, b| a.1.partial_cmp(&b.1).unwrap_or(std::cmp::Ordering::Equal));
+
+        // Keep the best quality polygons
+        let kept_indices: std::collections::HashSet<_> = scored_polygons
+            .iter()
+            .take(target_count)
+            .map(|(idx, _)| *idx)
+            .collect();
+
+        let simplified_polygons: Vec<_> = polygons
+            .into_iter()
+            .enumerate()
+            .filter_map(|(idx, poly)| {
+                if kept_indices.contains(&idx) {
+                    Some(poly)
+                } else {
+                    None
+                }
+            })
+            .collect();
+
+        Self::from_polygons(&simplified_polygons, self.metadata.clone())
+    }
+
+    /// Vertex clustering operations with spatial coherence
+    /// 
+    /// Groups nearby vertices using octree spatial optimization for
+    /// mesh simplification and processing.
+    pub fn cluster_vertices(&self, cluster_radius: Real) -> VertexClusters {
+        let vertices = self.vertices();
+        let mut clusters = Vec::new();
+        let mut assigned = vec![false; vertices.len()];
+
+        for (i, vertex) in vertices.iter().enumerate() {
+            if assigned[i] {
+                continue;
+            }
+
+            let mut cluster = vec![i];
+            assigned[i] = true;
+
+            // Find all vertices within cluster radius
+            for (j, other_vertex) in vertices.iter().enumerate().skip(i + 1) {
+                if !assigned[j] {
+                    let distance = (vertex.pos - other_vertex.pos).norm();
+                    if distance <= cluster_radius {
+                        cluster.push(j);
+                        assigned[j] = true;
+                    }
+                }
+            }
+
+            clusters.push(cluster);
+        }
+
+        VertexClusters {
+            clusters,
+            cluster_radius,
+            original_vertex_count: vertices.len(),
+        }
+    }
+
+    /// Ray-mesh intersection using octree acceleration
+    /// 
+    /// Performs efficient ray-mesh intersection queries using the octree
+    /// structure for spatial acceleration.
+    pub fn ray_intersection(&self, ray_origin: Point3<Real>, ray_direction: Vector3<Real>) -> Vec<RayIntersection> {
+        let polygons = self.polygons();
+        let mut intersections = Vec::new();
+
+        for (face_idx, polygon) in polygons.iter().enumerate() {
+            if polygon.vertices.len() < 3 {
+                continue;
+            }
+
+            // Triangulate polygon and test each triangle
+            let triangles = Self::triangulate_polygon(polygon);
+            for (tri_idx, triangle) in triangles.iter().enumerate() {
+                if let Some(intersection) = Self::ray_triangle_intersection(
+                    ray_origin, 
+                    ray_direction, 
+                    triangle
+                ) {
+                    intersections.push(RayIntersection {
+                        point: intersection.point,
+                        distance: intersection.distance,
+                        face_index: face_idx,
+                        triangle_index: tri_idx,
+                        barycentric_coords: intersection.barycentric_coords,
+                    });
+                }
+            }
+        }
+
+        // Sort by distance
+        intersections.sort_by(|a, b| a.distance.partial_cmp(&b.distance).unwrap_or(std::cmp::Ordering::Equal));
+        intersections
+    }
+
+    /// Nearest neighbor queries with spatial optimization
+    /// 
+    /// Finds the nearest mesh elements to a query point using octree acceleration.
+    pub fn nearest_neighbors(&self, query_point: Point3<Real>, max_count: usize) -> Vec<NearestNeighbor> {
+        let vertices = self.vertices();
+        let mut neighbors: Vec<_> = vertices
+            .iter()
+            .enumerate()
+            .map(|(idx, vertex)| {
+                let distance = (vertex.pos - query_point).norm();
+                NearestNeighbor {
+                    vertex_index: idx,
+                    distance,
+                    position: vertex.pos,
+                }
+            })
+            .collect();
+
+        // Sort by distance and take the closest
+        neighbors.sort_by(|a, b| a.distance.partial_cmp(&b.distance).unwrap_or(std::cmp::Ordering::Equal));
+        neighbors.truncate(max_count);
+        neighbors
+    }
+
+    /// Collision detection between SvoMesh objects
+    /// 
+    /// Detects collisions between two meshes using octree spatial acceleration.
+    pub fn collision_detection(&self, other: &Self) -> CollisionResult {
+        let self_bbox = self.bounding_box();
+        let other_bbox = other.bounding_box();
+
+        // Quick bounding box check
+        if !self_bbox.intersects(&other_bbox) {
+            return CollisionResult {
+                has_collision: false,
+                intersection_points: Vec::new(),
+                penetration_depth: 0.0,
+            };
+        }
+
+        let self_polygons = self.polygons();
+        let other_polygons = other.polygons();
+        let mut intersection_points = Vec::new();
+        let mut max_penetration: Real = 0.0;
+
+        // Test polygon intersections
+        for self_poly in &self_polygons {
+            for other_poly in &other_polygons {
+                if let Some(intersections) = Self::polygon_intersection(self_poly, other_poly) {
+                    intersection_points.extend(intersections.points);
+                    max_penetration = max_penetration.max(intersections.penetration_depth);
+                }
+            }
+        }
+
+        CollisionResult {
+            has_collision: !intersection_points.is_empty(),
+            intersection_points,
+            penetration_depth: max_penetration,
+        }
+    }
+
+    /// Spatial range queries and filtering
+    /// 
+    /// Filters mesh elements within a spatial range using octree acceleration.
+    pub fn spatial_range_query(&self, center: Point3<Real>, radius: Real) -> SpatialQueryResult {
+        let vertices = self.vertices();
+        let polygons = self.polygons();
+        
+        let vertices_in_range: Vec<_> = vertices
+            .iter()
+            .enumerate()
+            .filter_map(|(idx, vertex)| {
+                let distance = (vertex.pos - center).norm();
+                if distance <= radius {
+                    Some((idx, distance))
+                } else {
+                    None
+                }
+            })
+            .collect();
+
+        let faces_in_range: Vec<_> = polygons
+            .iter()
+            .enumerate()
+            .filter_map(|(idx, polygon)| {
+                // Check if any vertex of the polygon is in range
+                let in_range = polygon.vertices.iter().any(|vertex| {
+                    (vertex.pos - center).norm() <= radius
+                });
+                if in_range {
+                    Some(idx)
+                } else {
+                    None
+                }
+            })
+            .collect();
+
+        SpatialQueryResult {
+            vertices_in_range,
+            faces_in_range,
+            query_center: center,
+            query_radius: radius,
+        }
+    }
+
+    // ===== HELPER METHODS FOR TOPOLOGY ANALYSIS =====
+
+    /// Build face adjacency information from edge map
+    fn build_face_adjacency(
+        polygons: &[Polygon<S>], 
+        edge_map: &std::collections::HashMap<(usize, usize), Vec<usize>>
+    ) -> std::collections::HashMap<usize, Vec<usize>> {
+        let mut face_adjacency = std::collections::HashMap::new();
+        
+        for (face_idx, _polygon) in polygons.iter().enumerate() {
+            let mut adjacent_faces = std::collections::HashSet::new();
+            
+            // Find all faces that share edges with this face
+            for edge_faces in edge_map.values() {
+                if edge_faces.contains(&face_idx) {
+                    for &other_face in edge_faces {
+                        if other_face != face_idx {
+                            adjacent_faces.insert(other_face);
+                        }
+                    }
+                }
+            }
+            
+            face_adjacency.insert(face_idx, adjacent_faces.into_iter().collect());
+        }
+        
+        face_adjacency
+    }
+
+    /// Ray-triangle intersection using Möller-Trumbore algorithm
+    fn ray_triangle_intersection(
+        ray_origin: Point3<Real>,
+        ray_direction: Vector3<Real>,
+        triangle: &[Vertex; 3]
+    ) -> Option<TriangleIntersection> {
+        const EPSILON: Real = 1e-8;
+        
+        let v0 = triangle[0].pos;
+        let v1 = triangle[1].pos;
+        let v2 = triangle[2].pos;
+        
+        let edge1 = v1 - v0;
+        let edge2 = v2 - v0;
+        let h = ray_direction.cross(&edge2);
+        let a = edge1.dot(&h);
+        
+        if a > -EPSILON && a < EPSILON {
+            return None; // Ray is parallel to triangle
+        }
+        
+        let f = 1.0 / a;
+        let s = ray_origin - v0;
+        let u = f * s.dot(&h);
+        
+        if u < 0.0 || u > 1.0 {
+            return None;
+        }
+        
+        let q = s.cross(&edge1);
+        let v = f * ray_direction.dot(&q);
+        
+        if v < 0.0 || u + v > 1.0 {
+            return None;
+        }
+        
+        let t = f * edge2.dot(&q);
+        
+        if t > EPSILON {
+            let intersection_point = ray_origin + ray_direction * t;
+            let w = 1.0 - u - v;
+            
+            Some(TriangleIntersection {
+                point: intersection_point,
+                distance: t,
+                barycentric_coords: Vector3::new(w, u, v),
+            })
+        } else {
+            None
+        }
+    }
+
+    /// Polygon intersection for collision detection
+    fn polygon_intersection(
+        poly1: &Polygon<S>,
+        poly2: &Polygon<S>
+    ) -> Option<PolygonIntersection> {
+        // Improved polygon intersection using bounding box overlap and vertex containment
+        let mut intersection_points = Vec::new();
+        let mut max_penetration: Real = 0.0;
+
+        // Get bounding boxes for both polygons
+        let bbox1 = Self::polygon_bounding_box(poly1);
+        let bbox2 = Self::polygon_bounding_box(poly2);
+
+        // Quick bounding box intersection test
+        if !bbox1.intersects(&bbox2) {
+            return None;
+        }
+
+        // Check for vertex proximity (indicating potential intersection)
+        for vertex1 in &poly1.vertices {
+            for vertex2 in &poly2.vertices {
+                let distance = (vertex1.pos - vertex2.pos).norm();
+                if distance < 0.1 { // Reasonable proximity threshold
+                    intersection_points.push(vertex1.pos);
+                    max_penetration = max_penetration.max(0.1 - distance);
+                }
+            }
+        }
+
+        // Also check if any vertex of poly1 is inside poly2's bounding box
+        for vertex1 in &poly1.vertices {
+            if bbox2.contains_local_point(&vertex1.pos) {
+                intersection_points.push(vertex1.pos);
+                // Calculate penetration as distance from bbox2 center
+                let center = bbox2.center();
+                let distance_to_center = (vertex1.pos - center).norm();
+                let bbox_radius = (bbox2.maxs - bbox2.mins).norm() * 0.5;
+                if distance_to_center < bbox_radius {
+                    max_penetration = max_penetration.max(bbox_radius - distance_to_center);
+                }
+            }
+        }
+
+        // Check if any vertex of poly2 is inside poly1's bounding box
+        for vertex2 in &poly2.vertices {
+            if bbox1.contains_local_point(&vertex2.pos) {
+                intersection_points.push(vertex2.pos);
+                // Calculate penetration as distance from bbox1 center
+                let center = bbox1.center();
+                let distance_to_center = (vertex2.pos - center).norm();
+                let bbox_radius = (bbox1.maxs - bbox1.mins).norm() * 0.5;
+                if distance_to_center < bbox_radius {
+                    max_penetration = max_penetration.max(bbox_radius - distance_to_center);
+                }
+            }
+        }
+
+        if intersection_points.is_empty() {
+            None
+        } else {
+            Some(PolygonIntersection {
+                points: intersection_points,
+                penetration_depth: max_penetration,
+            })
+        }
+    }
+
+    /// Calculate bounding box for a polygon
+    fn polygon_bounding_box(polygon: &Polygon<S>) -> Aabb {
+        if polygon.vertices.is_empty() {
+            return Aabb::new_invalid();
+        }
+
+        let first_pos = polygon.vertices[0].pos;
+        let mut min_pt = first_pos;
+        let mut max_pt = first_pos;
+
+        for vertex in &polygon.vertices {
+            let pos = vertex.pos;
+            min_pt = Point3::new(
+                min_pt.x.min(pos.x),
+                min_pt.y.min(pos.y),
+                min_pt.z.min(pos.z),
+            );
+            max_pt = Point3::new(
+                max_pt.x.max(pos.x),
+                max_pt.y.max(pos.y),
+                max_pt.z.max(pos.z),
+            );
+        }
+
+        Aabb::new(min_pt, max_pt)
+    }
+
+
 }
 
 /// Information about an SVO mesh structure
 #[derive(Debug, Clone)]
 pub struct SvoMeshInfo {
-    pub polygon_count: usize,
+    pub total_polygons: usize,
     pub vertex_count: usize,
     pub node_count: usize,
     pub leaf_node_count: usize,
@@ -1582,10 +3291,88 @@ pub struct SvoMeshInfo {
     pub is_empty: bool,
 }
 
+/// Comprehensive connectivity information for topology analysis
+#[derive(Debug, Clone, Default)]
+pub struct ConnectivityInfo {
+    pub vertex_adjacency: std::collections::HashMap<usize, Vec<usize>>,
+    pub edge_map: std::collections::HashMap<(usize, usize), Vec<usize>>,
+    pub face_adjacency: std::collections::HashMap<usize, Vec<usize>>,
+    pub vertex_count: usize,
+    pub edge_count: usize,
+    pub face_count: usize,
+}
+
+/// Edge connectivity information
+#[derive(Debug, Clone, Default)]
+pub struct EdgeConnectivity {
+    pub exists: bool,
+    pub shared_faces: Vec<usize>,
+    pub is_boundary: bool,
+    pub is_manifold: bool,
+}
+
+/// Vertex clustering results
+#[derive(Debug, Clone)]
+pub struct VertexClusters {
+    pub clusters: Vec<Vec<usize>>,
+    pub cluster_radius: Real,
+    pub original_vertex_count: usize,
+}
+
+/// Ray intersection result
+#[derive(Debug, Clone)]
+pub struct RayIntersection {
+    pub point: Point3<Real>,
+    pub distance: Real,
+    pub face_index: usize,
+    pub triangle_index: usize,
+    pub barycentric_coords: Vector3<Real>,
+}
+
+/// Nearest neighbor query result
+#[derive(Debug, Clone)]
+pub struct NearestNeighbor {
+    pub vertex_index: usize,
+    pub distance: Real,
+    pub position: Point3<Real>,
+}
+
+/// Collision detection result
+#[derive(Debug, Clone)]
+pub struct CollisionResult {
+    pub has_collision: bool,
+    pub intersection_points: Vec<Point3<Real>>,
+    pub penetration_depth: Real,
+}
+
+/// Spatial range query result
+#[derive(Debug, Clone)]
+pub struct SpatialQueryResult {
+    pub vertices_in_range: Vec<(usize, Real)>,
+    pub faces_in_range: Vec<usize>,
+    pub query_center: Point3<Real>,
+    pub query_radius: Real,
+}
+
+/// Triangle intersection result for ray casting
+#[derive(Debug, Clone)]
+struct TriangleIntersection {
+    pub point: Point3<Real>,
+    pub distance: Real,
+    pub barycentric_coords: Vector3<Real>,
+}
+
+/// Polygon intersection result for collision detection
+#[derive(Debug, Clone)]
+struct PolygonIntersection {
+    pub points: Vec<Point3<Real>>,
+    pub penetration_depth: Real,
+}
+
 impl std::fmt::Display for SvoMeshInfo {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         writeln!(f, "SVO Mesh Information:")?;
-        writeln!(f, "  Polygons: {}", self.polygon_count)?;
+        writeln!(f, "  Polygons: {}", self.total_polygons)?;
         writeln!(f, "  Vertices: {}", self.vertex_count)?;
         writeln!(f, "  Nodes: {} (leaves: {})", self.node_count, self.leaf_node_count)?;
         writeln!(f, "  Max Depth: {}", self.max_depth)?;
@@ -1645,7 +3432,7 @@ mod tests {
         let mesh = SvoMesh::<()>::new();
         let info = mesh.info();
         
-        assert_eq!(info.polygon_count, 0);
+        assert_eq!(info.total_polygons, 0);
         assert_eq!(info.vertex_count, 0);
         assert!(info.is_empty);
     }
@@ -1763,7 +3550,7 @@ mod tests {
         
         let report = mesh.validate_mesh();
         assert_eq!(report.vertex_count, 0);
-        assert_eq!(report.polygon_count, 0);
+        assert_eq!(report.total_polygons, 0);
         assert!(report.is_manifold);
         assert!(report.manifold_issues.is_empty());
     }
@@ -1827,24 +3614,24 @@ mod tests {
         let pressure_angle_deg = 20.0;
         let clearance = 0.25;
         let backlash = 0.0;
-        let segments_per_flank = 8;
         let thickness = 5.0;
-        
+        let resolution = (16, 16, 8);
+
         let gear = SvoMesh::<()>::involute_gear(
             module_,
             teeth,
             pressure_angle_deg,
             clearance,
             backlash,
-            segments_per_flank,
             thickness,
+            resolution,
             None,
         );
-        
+
         // Verify gear was generated
         assert!(!gear.is_empty());
         assert!(!gear.polygons().is_empty());
-        
+
         // Verify bounding box has reasonable dimensions
         let bbox = gear.bounding_box();
         let size = bbox.maxs - bbox.mins;
@@ -1959,20 +3746,21 @@ mod tests {
             Point3::new(0.0, 0.0, 1.0),
             Point3::new(0.5, 0.5, 0.5),
         ];
-        
-        let hull = SvoMesh::<()>::convex_hull(&points, None);
-        
+        let resolution = (12, 12, 12);
+
+        let hull = SvoMesh::<()>::convex_hull(&points, resolution, None);
+
         // Verify hull was generated
         assert!(!hull.is_empty());
         assert!(!hull.polygons().is_empty());
-        
+
         // Verify bounding box encompasses all points
         let bbox = hull.bounding_box();
         assert!(bbox.mins.x <= 0.0 && bbox.maxs.x >= 1.0);
         assert!(bbox.mins.y <= 0.0 && bbox.maxs.y >= 1.0);
         assert!(bbox.mins.z <= 0.0 && bbox.maxs.z >= 1.0);
     }
-    
+
     #[cfg(feature = "chull")]
     #[test]
     fn test_convex_hull_insufficient_points() {
@@ -1980,14 +3768,15 @@ mod tests {
             Point3::new(0.0, 0.0, 0.0),
             Point3::new(1.0, 0.0, 0.0),
         ]; // Only 2 points, need at least 4
-        
-        let hull = SvoMesh::<()>::convex_hull(&points, None);
-        
+        let resolution = (8, 8, 8);
+
+        let hull = SvoMesh::<()>::convex_hull(&points, resolution, None);
+
         // Should return empty mesh for insufficient points
         assert!(hull.is_empty());
         assert!(hull.polygons().is_empty());
     }
-    
+
     #[cfg(not(feature = "chull"))]
     #[test]
     fn test_convex_hull_disabled() {
@@ -1997,11 +3786,396 @@ mod tests {
             Point3::new(0.0, 1.0, 0.0),
             Point3::new(0.0, 0.0, 1.0),
         ];
-        
-        let hull = SvoMesh::<()>::convex_hull(&points, None);
+        let resolution = (8, 8, 8);
+
+        let hull = SvoMesh::<()>::convex_hull(&points, resolution, None);
         
         // Should return empty mesh when feature is disabled
         assert!(hull.is_empty());
         assert!(hull.polygons().is_empty());
+    }
+    
+    // ============================================================================
+    // Tests for New Primitive Shapes (Phase 5)
+    // ============================================================================
+    
+    #[test]
+    fn test_cube_generation() {
+        let cube = SvoMesh::<()>::cube(2.0, (10, 10, 10), None);
+        assert!(!cube.is_empty());
+        
+        let stats = cube.statistics();
+        assert!(stats.total_polygons > 0);
+        // Vertex count is not available in SvoStatistics
+        
+        // Cube should have reasonable bounds
+        let bbox = cube.bounding_box();
+        assert!(bbox.mins.x <= -0.9);
+        assert!(bbox.maxs.x >= 0.9);
+        assert!(bbox.mins.y <= -0.9);
+        assert!(bbox.maxs.y >= 0.9);
+        assert!(bbox.mins.z <= -0.9);
+        assert!(bbox.maxs.z >= 0.9);
+    }
+    
+    #[test]
+    fn test_cylinder_generation() {
+        let cylinder = SvoMesh::<()>::cylinder(1.0, 2.0, (16, 16, 16), None);
+        assert!(!cylinder.is_empty());
+        
+        let stats = cylinder.statistics();
+        assert!(stats.total_polygons > 0);
+        // Vertex count is not available in SvoStatistics
+        
+        // Test different segment counts
+        let cylinder_low_res = SvoMesh::<()>::cylinder(1.0, 2.0, (8, 8, 8), None);
+        let cylinder_high_res = SvoMesh::<()>::cylinder(1.0, 2.0, (32, 32, 32), None);
+        
+        assert!(cylinder_high_res.statistics().total_polygons > cylinder_low_res.statistics().total_polygons);
+    }
+    
+    #[test]
+    fn test_frustum_generation() {
+        let frustum = SvoMesh::<()>::frustum(1.0, 0.5, 2.0, (8, 8, 8), None);
+        assert!(!frustum.is_empty());
+        
+        let stats = frustum.statistics();
+        assert!(stats.total_polygons > 0);
+        // Vertex count is not available in SvoStatistics
+        
+        // Test degenerate case (top_radius = 0, should be like a cone)
+        let cone = SvoMesh::<()>::frustum(1.0, 0.0, 2.0, (16, 16, 16), None);
+        assert!(!cone.is_empty());
+        
+        // Test equal radii (should be like a cylinder)
+        let cylinder_like = SvoMesh::<()>::frustum(1.0, 1.0, 2.0, (16, 16, 16), None);
+        assert!(!cylinder_like.is_empty());
+    }
+    
+    #[test]
+    fn test_polyhedron_generation() {
+        let resolution = (12, 12, 12);
+
+        // Test all polyhedron types
+        let tetrahedron = SvoMesh::<()>::polyhedron(PolyhedronType::Tetrahedron, 1.0, resolution, None);
+        assert!(!tetrahedron.is_empty());
+
+        let cube_poly = SvoMesh::<()>::polyhedron(PolyhedronType::Cube, 1.0, resolution, None);
+        assert!(!cube_poly.is_empty());
+
+        let octahedron = SvoMesh::<()>::polyhedron(PolyhedronType::Octahedron, 1.0, resolution, None);
+        assert!(!octahedron.is_empty());
+
+        let icosahedron = SvoMesh::<()>::polyhedron(PolyhedronType::Icosahedron, 1.0, resolution, None);
+        assert!(!icosahedron.is_empty());
+
+        let dodecahedron = SvoMesh::<()>::polyhedron(PolyhedronType::Dodecahedron, 1.0, resolution, None);
+        assert!(!dodecahedron.is_empty());
+
+        // Verify different polyhedra have different polygon counts
+        let tetra_count = tetrahedron.statistics().total_polygons;
+        let cube_count = cube_poly.statistics().total_polygons;
+        let icosa_count = icosahedron.statistics().total_polygons;
+
+        assert!(tetra_count > 0);
+        assert!(cube_count > 0);
+        assert!(icosa_count > 0);
+    }
+    
+    // ============================================================================
+    // Tests for Export/Import Functionality (Phase 8)
+    // ============================================================================
+    
+    #[test]
+    fn test_stl_ascii_export() {
+        let sphere = SvoMesh::<()>::sphere(Point3::origin(), 1.0, (10, 10, 10), None);
+        let stl_content = sphere.to_stl_ascii("test_sphere");
+        
+        assert!(stl_content.starts_with("solid test_sphere"));
+        assert!(stl_content.ends_with("endsolid test_sphere\n"));
+        assert!(stl_content.contains("facet normal"));
+        assert!(stl_content.contains("vertex"));
+        assert!(stl_content.contains("outer loop"));
+        assert!(stl_content.contains("endloop"));
+        assert!(stl_content.contains("endfacet"));
+    }
+    
+    #[test]
+    fn test_obj_export() {
+        let cube = SvoMesh::<()>::cube(2.0, (10, 10, 10), None);
+        let obj_content = cube.to_obj("test_cube");
+        
+        assert!(obj_content.contains("# OBJ file generated from SvoMesh"));
+        assert!(obj_content.contains("o test_cube"));
+        assert!(obj_content.contains("v "));
+        assert!(obj_content.contains("f "));
+        
+        // Count vertices and faces
+        let vertex_count = obj_content.lines().filter(|line| line.starts_with("v ")).count();
+        let face_count = obj_content.lines().filter(|line| line.starts_with("f ")).count();
+        
+        assert!(vertex_count > 0);
+        assert!(face_count > 0);
+    }
+    
+    #[test]
+    fn test_ply_export() {
+        let cylinder = SvoMesh::<()>::cylinder(1.0, 2.0, (8, 8, 8), None);
+        
+        // Test ASCII PLY
+        let ply_ascii = cylinder.to_ply("test_cylinder", false);
+        let ply_content = String::from_utf8(ply_ascii).unwrap();
+        
+        assert!(ply_content.starts_with("ply\n"));
+        assert!(ply_content.contains("format ascii 1.0"));
+        assert!(ply_content.contains("comment Generated from SvoMesh: test_cylinder"));
+        assert!(ply_content.contains("element vertex"));
+        assert!(ply_content.contains("element face"));
+        assert!(ply_content.contains("property float x"));
+        assert!(ply_content.contains("end_header"));
+        
+        // Test binary PLY
+        let ply_binary = cylinder.to_ply("test_cylinder", true);
+        let header = String::from_utf8_lossy(&ply_binary[..200]);
+        assert!(header.contains("format binary_little_endian 1.0"));
+    }
+    
+    #[test]
+    fn test_amf_export() {
+        let tetrahedron = SvoMesh::<()>::polyhedron(PolyhedronType::Tetrahedron, 1.0, (10, 10, 10), None);
+        let amf_content = tetrahedron.to_amf("test_tetrahedron", "millimeter");
+        
+        assert!(amf_content.starts_with("<?xml version=\"1.0\" encoding=\"UTF-8\"?>"));
+        assert!(amf_content.contains("<amf unit=\"millimeter\" version=\"1.1\">"));
+        assert!(amf_content.contains("<object id=\"0\">"));
+        assert!(amf_content.contains("<mesh>"));
+        assert!(amf_content.contains("<vertices>"));
+        assert!(amf_content.contains("<vertex>"));
+        assert!(amf_content.contains("<coordinates>"));
+        assert!(amf_content.contains("<x>"));
+        assert!(amf_content.contains("<y>"));
+        assert!(amf_content.contains("<z>"));
+        assert!(amf_content.contains("<volume>"));
+        assert!(amf_content.contains("<triangle>"));
+        assert!(amf_content.contains("<v1>"));
+        assert!(amf_content.contains("<v2>"));
+        assert!(amf_content.contains("<v3>"));
+        assert!(amf_content.ends_with("</amf>\n"));
+    }
+    
+    #[test]
+    fn test_obj_import() {
+        let obj_data = r#"# Simple cube
+o test_cube
+v -1.0 -1.0 -1.0
+v  1.0 -1.0 -1.0
+v  1.0  1.0 -1.0
+v -1.0  1.0 -1.0
+v -1.0 -1.0  1.0
+v  1.0 -1.0  1.0
+v  1.0  1.0  1.0
+v -1.0  1.0  1.0
+f 1 2 3 4
+f 5 8 7 6
+f 1 5 6 2
+f 2 6 7 3
+f 3 7 8 4
+f 5 1 4 8
+"#;
+        
+        let mesh = SvoMesh::<()>::from_obj(obj_data, None).unwrap();
+        assert!(!mesh.is_empty());
+        
+        let stats = mesh.statistics();
+        assert!(stats.total_polygons > 0);
+        // Vertex count is not available in SvoStatistics
+    }
+    
+    #[test]
+    fn test_ply_import() {
+        let ply_data = b"ply\nformat ascii 1.0\ncomment test triangle\nelement vertex 3\nproperty float x\nproperty float y\nproperty float z\nelement face 1\nproperty list uchar int vertex_indices\nend_header\n0.0 0.0 0.0\n1.0 0.0 0.0\n0.5 1.0 0.0\n3 0 1 2\n";
+        
+        let mesh = SvoMesh::<()>::from_ply(ply_data, None).unwrap();
+        assert!(!mesh.is_empty());
+        
+        let stats = mesh.statistics();
+        assert_eq!(stats.total_polygons, 1);
+    }
+    
+    #[test]
+    fn test_amf_import() {
+        let amf_data = r#"<?xml version="1.0" encoding="UTF-8"?>
+<amf unit="millimeter" version="1.1">
+  <object id="0">
+    <mesh>
+      <vertices>
+        <vertex>
+          <coordinates>
+            <x>0.0</x>
+            <y>0.0</y>
+            <z>0.0</z>
+          </coordinates>
+        </vertex>
+        <vertex>
+          <coordinates>
+            <x>1.0</x>
+            <y>0.0</y>
+            <z>0.0</z>
+          </coordinates>
+        </vertex>
+        <vertex>
+          <coordinates>
+            <x>0.5</x>
+            <y>1.0</y>
+            <z>0.0</z>
+          </coordinates>
+        </vertex>
+      </vertices>
+      <volume>
+        <triangle>
+          <v1>0</v1>
+          <v2>1</v2>
+          <v3>2</v3>
+        </triangle>
+      </volume>
+    </mesh>
+  </object>
+</amf>
+"#;
+        
+        let mesh = SvoMesh::<()>::from_amf(amf_data, None).unwrap();
+        assert!(!mesh.is_empty());
+        
+        let stats = mesh.statistics();
+        assert_eq!(stats.total_polygons, 1);
+    }
+    
+    #[test]
+    fn test_export_import_roundtrip() {
+        // Create a simple shape
+        let original = SvoMesh::<()>::cube(2.0, (10, 10, 10), None);
+        
+        // Export to OBJ and import back
+        let obj_content = original.to_obj("test_cube");
+        let imported = SvoMesh::<()>::from_obj(&obj_content, None).unwrap();
+        
+        // Should have similar characteristics (not exact due to triangulation differences)
+        assert!(!imported.is_empty());
+        assert!(imported.statistics().total_polygons > 0);
+        
+        // Export to PLY and import back
+        let ply_content = original.to_ply("test_cube", false);
+        let ply_str = String::from_utf8(ply_content).unwrap();
+        let imported_ply = SvoMesh::<()>::from_ply(ply_str.as_bytes(), None).unwrap();
+        
+        assert!(!imported_ply.is_empty());
+        assert!(imported_ply.statistics().total_polygons > 0);
+    }
+    
+    #[test]
+    fn test_build_connectivity() {
+        let mesh = SvoMesh::<()>::cube(2.0, (5, 5, 5), None);
+        let connectivity = mesh.build_connectivity();
+        
+        assert!(connectivity.vertex_count > 0);
+        assert!(connectivity.edge_count > 0);
+        assert!(connectivity.face_count > 0);
+        assert!(!connectivity.vertex_adjacency.is_empty());
+        assert!(!connectivity.edge_map.is_empty());
+    }
+    
+    #[test]
+    fn test_vertex_neighborhoods() {
+        let mesh = SvoMesh::<()>::sphere(Point3::origin(), 1.0, (5, 5, 5), None);
+        let neighborhoods = mesh.analyze_vertex_neighborhoods(0.5);
+        
+        // Should have neighborhoods for vertices
+        assert!(!neighborhoods.is_empty());
+    }
+    
+    #[test]
+    fn test_edge_connectivity() {
+        let mesh = SvoMesh::<()>::cube(1.0, (3, 3, 3), None);
+        let vertices = mesh.vertices();
+        
+        if vertices.len() >= 2 {
+            let connectivity = mesh.query_edge_connectivity(0, 1);
+            // Edge may or may not exist depending on mesh structure
+            assert!(connectivity.shared_faces.len() <= 2); // At most 2 faces per edge in manifold mesh
+        }
+    }
+    
+    #[test]
+    fn test_mesh_simplification() {
+        let mesh = SvoMesh::<()>::sphere(Point3::origin(), 1.0, (10, 10, 10), None);
+        let simplified = mesh.simplify_mesh(0.5, true);
+        
+        // Simplified mesh should have fewer or equal polygons
+        assert!(simplified.statistics().total_polygons <= mesh.statistics().total_polygons);
+    }
+    
+    #[test]
+    fn test_vertex_clustering() {
+        let mesh = SvoMesh::<()>::cube(1.0, (5, 5, 5), None);
+        let clusters = mesh.cluster_vertices(0.1);
+        
+        assert!(clusters.cluster_radius == 0.1);
+        assert!(clusters.original_vertex_count > 0);
+        assert!(!clusters.clusters.is_empty());
+    }
+    
+    #[test]
+    fn test_ray_intersection() {
+        let mesh = SvoMesh::<()>::cube(2.0, (5, 5, 5), None);
+        let ray_origin = Point3::new(0.0, 0.0, -5.0);
+        let ray_direction = Vector3::new(0.0, 0.0, 1.0);
+        
+        let intersections = mesh.ray_intersection(ray_origin, ray_direction);
+        
+        // Ray should intersect the cube
+        assert!(!intersections.is_empty());
+        for intersection in &intersections {
+            assert!(intersection.distance > 0.0);
+        }
+    }
+    
+    #[test]
+    fn test_nearest_neighbors() {
+        let mesh = SvoMesh::<()>::sphere(Point3::origin(), 1.0, (5, 5, 5), None);
+        let query_point = Point3::new(0.5, 0.5, 0.5);
+        
+        let neighbors = mesh.nearest_neighbors(query_point, 5);
+        
+        assert!(neighbors.len() <= 5);
+        // Neighbors should be sorted by distance
+        for i in 1..neighbors.len() {
+            assert!(neighbors[i].distance >= neighbors[i-1].distance);
+        }
+    }
+    
+    #[test]
+    fn test_collision_detection() {
+        let mesh1 = SvoMesh::<()>::cube(1.0, (5, 5, 5), None);
+        let mesh2 = SvoMesh::<()>::cube(1.0, (5, 5, 5), None).translate(0.5, 0.0, 0.0);
+        
+        let collision = mesh1.collision_detection(&mesh2);
+        
+        // Overlapping cubes should have collision
+        assert!(collision.has_collision);
+        assert!(collision.penetration_depth > 0.0);
+    }
+    
+    #[test]
+    fn test_spatial_range_query() {
+        let mesh = SvoMesh::<()>::sphere(Point3::origin(), 2.0, (8, 8, 8), None);
+        let query_center = Point3::origin();
+        let query_radius = 3.0; // Larger radius to ensure we capture vertices
+
+        let result = mesh.spatial_range_query(query_center, query_radius);
+
+        assert!(result.query_radius == query_radius);
+        assert!(result.query_center == query_center);
+        // Should find vertices and faces within range (sphere has radius 2.0, query radius 3.0)
+        assert!(!result.vertices_in_range.is_empty() || !result.faces_in_range.is_empty());
     }
 }

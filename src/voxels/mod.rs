@@ -23,8 +23,7 @@
 
 
 
-#[cfg(feature = "parallel")]
-use rayon::prelude::*;
+
 
 pub mod svo_node;
 pub mod svo_mesh;
