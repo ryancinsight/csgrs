@@ -12,6 +12,8 @@
 //! - **CSG Compatibility**: Full implementation of the CSG trait
 //! - **Zero-Copy Operations**: Leverages Rust's iterator system for efficient processing
 //! - **Unified BSP Logic**: Single implementation with feature-gated parallelism
+//! - **SDF Meshing**: Signed distance field surface extraction with octree optimization
+//! - **TPMS Generation**: Triply periodic minimal surfaces with mathematical precision
 //!
 //! ## Architecture
 //!
@@ -29,6 +31,8 @@ pub mod svo_mesh;
 pub mod bsp_unified;
 pub mod precision;
 pub mod conversion;
+pub mod sdf;
+pub mod tpms;
 
 pub use svo_node::SvoNode;
 pub use svo_mesh::SvoMesh;
