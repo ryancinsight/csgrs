@@ -18,6 +18,7 @@ use crate::mesh::{
     vertex::Vertex,
 };
 use std::fmt::Debug;
+use crate::float_types::Real;
 
 #[cfg(feature = "parallel")]
 use rayon::prelude::*;
@@ -106,7 +107,7 @@ impl<S: Clone + Send + Sync + Debug> UnifiedBspNode<S> {
     /// Minimizes polygon splits while balancing tree depth
     pub fn pick_best_splitting_plane(&self, polygons: &[Polygon<S>]) -> Plane {
         let mut best_plane = polygons[0].plane.clone();
-        let mut best_score = f64::INFINITY;
+    let mut best_score = Real::INFINITY;
         
         // Evaluate subset of polygons as potential splitting planes
         let step = (polygons.len() / 10).max(1);
@@ -128,8 +129,8 @@ impl<S: Clone + Send + Sync + Debug> UnifiedBspNode<S> {
             }
             
             // Scoring function: minimize splits, balance front/back
-            let balance_penalty = ((front_count as f64) - (back_count as f64)).abs();
-            let split_penalty = (split_count as f64) * 3.0; // Splits are expensive
+            let balance_penalty = ((front_count as Real) - (back_count as Real)).abs();
+            let split_penalty = (split_count as Real) * 3.0; // Splits are expensive
             let score = balance_penalty + split_penalty;
             
             if score < best_score {
@@ -355,7 +356,7 @@ impl<S: Clone + Send + Sync + Debug> UnifiedBspNode<S> {
         let cross = d1.cross(&d2);
         let denom = cross.norm_squared();
         
-        if denom < 1e-10 {
+    if denom < Real::EPSILON {
             return None; // Lines are parallel
         }
         
@@ -369,9 +370,12 @@ impl<S: Clone + Send + Sync + Debug> UnifiedBspNode<S> {
             // Verify the intersection lies on the slicing plane
             let plane_normal = plane.normal();
             let plane_offset = plane.offset();
-            if (plane_normal.dot(&intersection_pos.coords) - plane_offset).abs() < 1e-6 {
+            if (plane_normal.dot(&intersection_pos.coords) - plane_offset).abs() < (10.0 * Real::EPSILON) {
                 // Interpolate vertex attributes
-                let normal = (p1.normal + p2.normal).normalize();
+                let mut normal = p1.normal + p2.normal;
+                if normal.norm_squared() > Real::EPSILON {
+                    normal = normal.normalize();
+                }
                 
                 return Some(Vertex::new(intersection_pos, normal));
             }

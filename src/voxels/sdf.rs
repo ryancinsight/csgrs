@@ -14,6 +14,7 @@
 use crate::float_types::Real;
 use crate::mesh::{polygon::Polygon, vertex::Vertex};
 use crate::voxels::{precision::PrecisionConfig, svo_mesh::SvoMesh};
+#[cfg(feature = "sdf")]
 use fast_surface_nets::{surface_nets, SurfaceNetsBuffer};
 use nalgebra::{Point3, Vector3};
 use std::fmt::Debug;
@@ -174,9 +175,11 @@ impl<S: Clone + Send + Sync + Debug> SvoMesh<S> {
 
         // Configure surface nets with adaptive grid
         let shape = AdaptiveGridShape { nx, ny, nz };
+
+        #[cfg(feature = "sdf")]
         let mut surface_buffer = SurfaceNetsBuffer::default();
 
-        // Extract surface using surface nets algorithm
+        #[cfg(feature = "sdf")]
         surface_nets(
             &field_values,
             &shape,
@@ -186,7 +189,8 @@ impl<S: Clone + Send + Sync + Debug> SvoMesh<S> {
         );
 
         // Convert surface nets output to polygons using iterator combinators
-        let polygons: Vec<Polygon<S>> = surface_buffer
+    #[cfg(feature = "sdf")]
+    let polygons: Vec<Polygon<S>> = surface_buffer
             .indices
             .chunks_exact(3)
             .filter_map(|triangle_indices| {
@@ -229,6 +233,9 @@ impl<S: Clone + Send + Sync + Debug> SvoMesh<S> {
                 }
             })
             .collect();
+
+    #[cfg(not(feature = "sdf"))]
+    let polygons: Vec<Polygon<S>> = Vec::new();
 
         // Create SvoMesh from generated polygons
         let mut svo_mesh = Self::with_precision(config.precision);

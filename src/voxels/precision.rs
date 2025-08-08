@@ -57,13 +57,13 @@ impl PrecisionConfig {
     
     /// Check if two fixed-point values are approximately equal
     #[inline]
-    pub fn fixed_eq(&self, a: i64, b: i64) -> bool {
+    pub const fn fixed_eq(&self, a: i64, b: i64) -> bool {
         (a - b).abs() <= self.epsilon_scaled
     }
     
     /// Check if fixed-point value is approximately zero
     #[inline]
-    pub fn fixed_is_zero(&self, value: i64) -> bool {
+    pub const fn fixed_is_zero(&self, value: i64) -> bool {
         value.abs() <= self.epsilon_scaled
     }
 }

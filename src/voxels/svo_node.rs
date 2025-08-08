@@ -15,13 +15,17 @@ use crate::voxels::{
     bsp_unified::UnifiedBspNode,
     precision::PrecisionConfig,
 };
-use crate::float_types::parry3d::bounding_volume::{Aabb, BoundingVolume};
+use crate::float_types::{
+    parry3d::bounding_volume::Aabb,
+    Real,
+};
 use nalgebra::Point3;
 use std::fmt::Debug;
+// Real already imported above
 
 // Constants
 const OCTREE_CHILDREN: usize = 8;
-const MIN_VOXEL_SIZE: f64 = 0.001;
+const MIN_VOXEL_SIZE: Real = 0.001;
 const MAX_SUBDIVISION_DEPTH: usize = 5;
 const SUBDIVISION_THRESHOLD: usize = 100;
 
@@ -121,9 +125,9 @@ impl<S: Clone + Send + Sync + Debug> SvoNode<S> {
             }
             
             // Distribute polygons to children
-            for (i, child_bounds) in self.compute_child_bounds().iter().enumerate() {
+        for (i, child_bounds) in self.compute_child_bounds().iter().enumerate() {
                 let child_polygons: Vec<_> = polygons.iter()
-                    .filter(|poly| self.polygon_intersects_bounds(poly, child_bounds))
+            .filter(|poly| self.polygon_intersects_bounds(poly, child_bounds))
                     .cloned()
                     .collect();
                 
@@ -190,9 +194,8 @@ impl<S: Clone + Send + Sync + Debug> SvoNode<S> {
         false
     }
     
-    /// Subdivide this node and distribute polygons to children
-
-    
+    /// Subdivide this node and distribute polygons to children.
+    ///
     /// Compute bounding boxes for the 8 octree children
     fn compute_child_bounds(&self) -> [Aabb; OCTREE_CHILDREN] {
         let center = self.bounds.center();
@@ -216,9 +219,25 @@ impl<S: Clone + Send + Sync + Debug> SvoNode<S> {
     
     /// Check if a polygon intersects with given bounds
     fn polygon_intersects_bounds(&self, polygon: &Polygon<S>, bounds: &Aabb) -> bool {
-        // Simple bounding box intersection test
+        // Epsilon-aware AABB intersection to improve robustness
         let poly_bounds = polygon.bounding_box();
-        bounds.intersects(&poly_bounds)
+        let eps = Self::aabb_eps(bounds, &poly_bounds);
+        Self::aabb_intersects_eps(bounds, &poly_bounds, eps)
+    }
+
+    #[inline]
+    fn aabb_eps(a: &Aabb, b: &Aabb) -> Real {
+        let diag_a = (a.maxs - a.mins).norm();
+        let diag_b = (b.maxs - b.mins).norm();
+        let base = (diag_a + diag_b) * 1e-9;
+        base.max(10.0 * Real::EPSILON)
+    }
+
+    #[inline]
+    fn aabb_intersects_eps(a: &Aabb, b: &Aabb, eps: Real) -> bool {
+        !(a.maxs.x + eps < b.mins.x || b.maxs.x + eps < a.mins.x ||
+          a.maxs.y + eps < b.mins.y || b.maxs.y + eps < a.mins.y ||
+          a.maxs.z + eps < b.mins.z || b.maxs.z + eps < a.mins.z)
     }
     
     /// Get all polygons from this node and its children
@@ -308,22 +327,30 @@ impl<S: Clone + Send + Sync + Debug> SvoNode<S> {
     
     /// Clip this node to another SVO node
     pub fn clip_to(&mut self, other: &SvoNode<S>) {
-        let all_other_polygons = other.all_polygons();
-        if all_other_polygons.is_empty() {
+        // Perform localized clipping using octree overlap to avoid global BSPs
+        Self::clip_against_pair(self, other);
+    }
+
+    /// Recursively clip `self_node` against `other_node` using only overlapping octants
+    fn clip_against_pair(self_node: &mut SvoNode<S>, other_node: &SvoNode<S>) {
+        // Early exit if bounds do not intersect
+    if !Self::aabb_intersects_eps(&self_node.bounds, &other_node.bounds, Self::aabb_eps(&self_node.bounds, &other_node.bounds)) {
             return;
         }
-        
-        let other_bsp = UnifiedBspNode::from_polygons(&all_other_polygons);
-        
-        // Clip local BSP
-        if let Some(ref mut bsp) = self.bsp {
-            bsp.clip_to(&other_bsp);
+
+        // Clip local BSP only against the overlapping other's local BSP
+        if let Some(ref other_bsp) = other_node.bsp {
+            if let Some(ref mut self_bsp) = self_node.bsp {
+                self_bsp.clip_to(other_bsp);
+            }
         }
-        
-        // Recursively clip children
-        for child in &mut self.children {
-            if let Some(child_node) = child.as_mut() {
-                child_node.clip_to(other);
+
+        // Recurse for intersecting children pairs
+        for child_self in self_node.children.iter_mut().filter_map(|c| c.as_mut()) {
+            for child_other in other_node.children.iter().filter_map(|c| c.as_ref()) {
+                if Self::aabb_intersects_eps(&child_self.bounds, &child_other.bounds, Self::aabb_eps(&child_self.bounds, &child_other.bounds)) {
+                    Self::clip_against_pair(child_self, child_other);
+                }
             }
         }
     }
@@ -428,6 +455,7 @@ impl SvoStatistics {
 mod tests {
     use super::*;
     use nalgebra::Point3;
+    use crate::float_types::parry3d::bounding_volume::Aabb;
     
     #[test]
     fn test_svo_node_creation() {
@@ -468,5 +496,24 @@ mod tests {
         assert_eq!(stats.nodes_with_geometry, 0);
         assert_eq!(stats.total_polygons, 0);
         assert_eq!(stats.max_depth, 0);
+    }
+
+    #[test]
+    fn test_aabb_intersection_eps() {
+        let a = Aabb::new(Point3::new(0.0, 0.0, 0.0), Point3::new(1.0, 1.0, 1.0));
+        let b = Aabb::new(Point3::new(1.0, 1.0, 1.0), Point3::new(2.0, 2.0, 2.0));
+        let eps = SvoNode::<()>::aabb_eps(&a, &b);
+        assert!(SvoNode::<()>::aabb_intersects_eps(&a, &b, eps));
+    }
+
+    #[test]
+    fn test_localized_clip_no_overlap() {
+        let bounds_a = Aabb::new(Point3::new(0.0, 0.0, 0.0), Point3::new(1.0, 1.0, 1.0));
+        let bounds_b = Aabb::new(Point3::new(2.0, 2.0, 2.0), Point3::new(3.0, 3.0, 3.0));
+        let mut a = SvoNode::<()>::new(bounds_a);
+        let b = SvoNode::<()>::new(bounds_b);
+
+        // If no overlap, clip should be a no-op and not panic
+        a.clip_to(&b);
     }
 }

@@ -21,10 +21,6 @@
 //! providing robust CSG operations while maintaining spatial efficiency through sparse
 //! voxel allocation.
 
-
-
-
-
 pub mod svo_node;
 pub mod svo_mesh;
 pub mod bsp_unified;
