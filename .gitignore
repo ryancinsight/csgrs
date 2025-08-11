@@ -20,3 +20,7 @@ xtask/target/
 # OS-specific files
 .DS_Store
 Thumbs.db
+
+# Binaries & debug symbols
+*.exe
+*.pdb

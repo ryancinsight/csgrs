@@ -13,6 +13,8 @@ use crate::float_types::{
     {EPSILON, Real},
 };
 use crate::mesh::{bsp::Node, plane::Plane, polygon::Polygon, vertex::Vertex};
+pub mod conversions;
+
 use crate::sketch::Sketch;
 use crate::traits::CSG;
 use geo::{CoordsIter, Geometry, Polygon as GeoPolygon};

@@ -54,6 +54,7 @@ impl<S: Clone + Send + Sync> Polygon<S> {
         }
     }
 
+
     /// Axis aligned bounding box of this Polygon (cached after first call)
     pub fn bounding_box(&self) -> Aabb {
         *self.bounding_box.get_or_init(|| {
@@ -264,7 +265,7 @@ impl<S: Clone + Send + Sync> Polygon<S> {
     /// ### **Midpoint Calculation**
     /// For triangle vertices (A, B, C):
     /// - **M₁ = midpoint(A,B)**: Linear interpolation at t=0.5
-    /// - **M₂ = midpoint(A,C)**: Linear interpolation at t=0.5  
+    /// - **M₂ = midpoint(A,C)**: Linear interpolation at t=0.5
     /// - **M₃ = midpoint(B,C)**: Linear interpolation at t=0.5
     ///
     /// ### **Subdivision Pattern**
@@ -398,7 +399,7 @@ impl<S: Clone + Send + Sync> Polygon<S> {
         let transformed_vertices = self.vertices.iter()
             .map(|v| v.transform(matrix))
             .collect();
-        
+
         Self::new(transformed_vertices, self.metadata.clone())
     }
 }

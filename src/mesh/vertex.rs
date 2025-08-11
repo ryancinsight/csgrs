@@ -14,7 +14,7 @@ pub struct Vertex {
 impl Vertex {
     /// Create a new [`Vertex`].
     ///
-    /// * `pos`    – the position in model space  
+    /// * `pos`    – the position in model space
     /// * `normal` – (optionally non‑unit) normal; it will be **copied verbatim**, so make sure it is oriented the way you need it for lighting / BSP tests.
     #[inline]
     pub fn new(mut pos: Point3<Real>, mut normal: Vector3<Real>) -> Self {
@@ -35,6 +35,10 @@ impl Vertex {
         Vertex { pos, normal }
     }
 
+}
+
+
+impl Vertex {
     /// Flip vertex normal
     pub fn flip(&mut self) {
         self.normal = -self.normal;
@@ -44,11 +48,11 @@ impl Vertex {
     pub fn transform(&self, matrix: &nalgebra::Matrix4<Real>) -> Self {
         let pos_homogeneous = matrix * self.pos.to_homogeneous();
         let new_pos = Point3::from(pos_homogeneous.xyz());
-        
+
         // Transform normal (use inverse transpose for proper normal transformation)
         let normal_matrix = matrix.fixed_view::<3, 3>(0, 0);
         let new_normal = normal_matrix * self.normal;
-        
+
         Vertex::new(new_pos, new_normal)
     }
 

@@ -18,7 +18,7 @@ use image::{GrayImage, ImageBuffer};
 use csgrs::mesh::metaballs::MetaBall;
 
 #[cfg(feature = "sdf")]
-use csgrs::voxels::{svo_mesh::SvoMesh, conversion::MeshConversion};
+use csgrs::voxels::csg::Voxels;
 
 type Mesh = csgrs::mesh::Mesh<()>;
 type Sketch = csgrs::sketch::Sketch<()>;
@@ -332,6 +332,41 @@ fn main() {
         let _ = fs::write("stl/frustum.stl", frustum.to_stl_ascii("frustum"));
     }
 
+    // Voxels: cube, cylinder, gyroid-sphere STL outputs (no conversions)
+    #[cfg(all(feature = "stl-io", feature = "sdf"))]
+    {
+        use csgrs::voxels::csg::Voxels;
+        use csgrs::voxels::shapes::*; // Bring shape fns into scope
+        use csgrs::voxels::tpms::*;   // Bring TPMS fns into scope
+
+        // cube_voxel.stl - using new SVO-based voxelization
+        let cube_voxel: Voxels<()> = Voxels::cube_voxelized(2.0, 6, None);
+        let _ = fs::write("stl/cube_voxel.stl", cube_voxel.to_stl_ascii("cube_voxel"));
+
+        // cylinder_voxel.stl - using new SVO-based voxelization
+        let cylinder_voxel: Voxels<()> = Voxels::cylinder_voxelized(1.0, 2.0, 6, None);
+        let _ = fs::write("stl/cylinder_voxel.stl", cylinder_voxel.to_stl_ascii("cylinder_voxel"));
+
+        // gyroid_sphere_voxel.stl: gyroid intersected with a sphere boundary
+        // Using direct SDF approach to avoid intersection issues
+        let gyroid_sphere_sdf = |p: &Point3<Real>| {
+            let sphere_dist = p.coords.norm() - 10.0; // Sphere radius = 10.0
+            let period_inv = 1.0 / 2.0; // period = 2.0
+            let x = p.x * period_inv; let y = p.y * period_inv; let z = p.z * period_inv;
+            let (sx, cx) = x.sin_cos(); let (sy, cy) = y.sin_cos(); let (sz, cz) = z.sin_cos();
+            let gyroid_dist = (sx * cy) + (sy * cz) + (sz * cx);
+            // Intersection: max of both distances (both must be <= 0 for inside)
+            sphere_dist.max(gyroid_dist)
+        };
+        let bounds_min = Point3::new(-12.0, -12.0, -12.0);
+        let bounds_max = Point3::new(12.0, 12.0, 12.0);
+        let gyroid_sphere: Voxels<()> = Voxels::sdf(gyroid_sphere_sdf, (32, 32, 32), bounds_min, bounds_max, 0.0, None);
+        let _ = fs::write(
+            "stl/gyroid_sphere_voxel.stl",
+            gyroid_sphere.to_stl_ascii("gyroid_sphere_voxel"),
+        );
+    }
+
     // 1) Create a cylinder (start=-1, end=+1) with radius=1, 32 slices
     #[cfg(feature = "stl-io")]
     {
@@ -418,21 +453,24 @@ fn main() {
         let bounds_max = Point3::new(2.0, 2.0, 2.0);
         let resolution = (60, 60, 60); // Same resolution as regular SDF sphere
 
-        let voxel_sphere = SvoMesh::<()>::sdf_with_resolution(
+        // Create a Voxels<S> using the new voxels SDF (svo-embedded BSP under the hood)
+        let voxel_shape: Voxels<()> = Voxels::sdf(
             sphere_sdf,
             resolution,
             bounds_min,
             bounds_max,
+            0.0,
             None,
         );
 
-        // Convert SvoMesh to regular Mesh for STL export
-        let voxel_sphere_mesh = Mesh::from_svo_mesh(&voxel_sphere);
+        // Export Voxels directly to STL (ASCII or binary)
+        let ascii = voxel_shape.to_stl_ascii("sdf_sphere_voxel");
+        let _ = std::fs::write("stl/sdf_sphere_voxel_ascii.stl", ascii);
 
         #[cfg(feature = "stl-io")]
         let _ = std::fs::write(
             "stl/sdf_sphere_voxel.stl",
-            voxel_sphere_mesh.to_stl_binary("sdf_sphere_voxel").unwrap(),
+            voxel_shape.to_stl_binary("sdf_sphere_voxel").unwrap(),
         );
     }
 

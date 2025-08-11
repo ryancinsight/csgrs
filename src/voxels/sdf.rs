@@ -1,380 +1,139 @@
-//! Signed Distance Field (SDF) meshing for Sparse Voxel Octrees
+//! SDF meshing for voxel pipelines with SVO integration
 //!
-//! This module provides SDF-based mesh generation optimized for the SVO-embedded BSP
-//! architecture. Unlike traditional uniform grid sampling, this implementation leverages
-//! the sparse octree structure for efficient spatial sampling and memory usage.
-//!
-//! ## Key Features
-//!
-//! - **Sparse Sampling**: Only evaluates SDF in occupied octree regions
-//! - **Precision Control**: Uses fixed-point arithmetic for robust computations
-//! - **Zero-Copy Operations**: Minimizes memory allocations through iterator patterns
-//! - **Mathematical Correctness**: Validated against analytical solutions
+//! This module provides SDF meshing that populates SVO with embedded BSP
+//! at surface-crossing cells for precise surface representation.
 
 use crate::float_types::Real;
-use crate::mesh::{polygon::Polygon, vertex::Vertex};
-use crate::voxels::{precision::PrecisionConfig, svo_mesh::SvoMesh};
-#[cfg(feature = "sdf")]
-use fast_surface_nets::{surface_nets, SurfaceNetsBuffer};
+use crate::voxels::polygon::Polygon;
+use crate::voxels::vertex::Vertex;
+use crate::voxels::csg::Voxels;
+use crate::voxels::bsp_integration::BspIntegrator;
+use crate::voxels::Svo;
+use fast_surface_nets::{SurfaceNetsBuffer, surface_nets};
 use nalgebra::{Point3, Vector3};
 use std::fmt::Debug;
 
-/// SDF sampling configuration for octree-aware meshing
-#[derive(Debug, Clone)]
-pub struct SdfConfig {
-    /// Base resolution for uniform sampling
-    pub resolution: (usize, usize, usize),
-    /// Iso-contour value (typically 0.0 for zero-level set)
-    pub iso_value: Real,
-    /// Precision configuration for robust arithmetic
-    pub precision: PrecisionConfig,
-    /// Maximum octree depth for adaptive sampling
-    pub max_depth: usize,
-    /// Minimum cell size threshold
-    pub min_cell_size: Real,
-}
-
-impl Default for SdfConfig {
-    fn default() -> Self {
-        Self {
-            resolution: (32, 32, 32),
-            iso_value: 0.0,
-            precision: PrecisionConfig::default(),
-            max_depth: 8,
-            min_cell_size: 1e-6,
-        }
-    }
-}
-
-/// Grid shape implementation for surface nets integration
-#[derive(Clone, Copy, Debug)]
-struct AdaptiveGridShape {
-    nx: u32,
-    ny: u32,
-    nz: u32,
-}
-
-impl fast_surface_nets::ndshape::Shape<3> for AdaptiveGridShape {
-    type Coord = u32;
-
-    #[inline]
-    fn as_array(&self) -> [Self::Coord; 3] {
-        [self.nx, self.ny, self.nz]
-    }
-
-    #[inline]
-    fn size(&self) -> Self::Coord {
-        self.nx * self.ny * self.nz
-    }
-
-    #[inline]
-    fn usize(&self) -> usize {
-        (self.nx * self.ny * self.nz) as usize
-    }
-
-    #[inline]
-    fn linearize(&self, coords: [Self::Coord; 3]) -> u32 {
-        let [x, y, z] = coords;
-        (z * self.ny + y) * self.nx + x
-    }
-
-    #[inline]
-    fn delinearize(&self, i: u32) -> [Self::Coord; 3] {
-        let x = i % self.nx;
-        let yz = i / self.nx;
-        let y = yz % self.ny;
-        let z = yz / self.ny;
-        [x, y, z]
-    }
-}
-
-/// Finite value validation using iterator patterns
-#[inline]
-fn validate_finite_point(p: &Point3<Real>) -> bool {
-    p.coords.iter().all(|&coord| coord.is_finite())
-}
-
-#[inline]
-fn validate_finite_vector(v: &Vector3<Real>) -> bool {
-    v.iter().all(|&coord| coord.is_finite())
-}
-
-impl<S: Clone + Send + Sync + Debug> SvoMesh<S> {
-    /// Create an SvoMesh from a signed distance field using adaptive octree sampling
-    ///
-    /// This method leverages the sparse octree structure for efficient SDF evaluation,
-    /// only sampling in regions that may contain the surface.
-    ///
-    /// # Arguments
-    ///
-    /// * `sdf` - Signed distance function that takes a point and returns the distance
-    /// * `config` - SDF sampling configuration
-    /// * `bounds_min` - Minimum bounds of the sampling region
-    /// * `bounds_max` - Maximum bounds of the sampling region
-    /// * `metadata` - Optional metadata to attach to generated polygons
-    ///
-    /// # Mathematical Foundation
-    ///
-    /// For a signed distance field f(p), the zero-level set {p : f(p) = iso_value}
-    /// represents the surface. Surface nets algorithm finds this iso-contour by
-    /// detecting sign changes in the field values.
+impl<S: Clone + Debug + Send + Sync> Voxels<S> {
+    /// Create Voxels from SDF using SVO with embedded BSP at surface-crossing cells
     pub fn sdf<F>(
         sdf: F,
-        config: SdfConfig,
-        bounds_min: Point3<Real>,
-        bounds_max: Point3<Real>,
+        resolution: (usize, usize, usize),
+        min_pt: Point3<Real>,
+        max_pt: Point3<Real>,
+        iso_value: Real,
         metadata: Option<S>,
-    ) -> Self
+    ) -> Voxels<S>
     where
-        F: Fn(&Point3<Real>) -> Real + Send + Sync,
+        F: Fn(&Point3<Real>) -> Real + Sync + Send,
     {
-        // Validate and normalize resolution
-        let nx = config.resolution.0.max(2) as u32;
-        let ny = config.resolution.1.max(2) as u32;
-        let nz = config.resolution.2.max(2) as u32;
-
-        // Compute grid spacing with precision-aware arithmetic
-        let dx = (bounds_max.x - bounds_min.x) / (nx as Real - 1.0);
-        let dy = (bounds_max.y - bounds_min.y) / (ny as Real - 1.0);
-        let dz = (bounds_max.z - bounds_min.z) / (nz as Real - 1.0);
-
-        // Pre-allocate field values array
-        let array_size = (nx * ny * nz) as usize;
-        let mut field_values = Vec::with_capacity(array_size);
-        field_values.resize(array_size, 0.0f32);
-
-        // Sample SDF using optimized iteration pattern for cache efficiency
-        // Mathematical foundation: Regular grid sampling with robust finite value handling
-        (0..array_size)
-            .map(|i| {
-                let i = i as u32;
-                let iz = i / (nx * ny);
-                let remainder = i % (nx * ny);
-                let iy = remainder / nx;
-                let ix = remainder % nx;
-
-                let x = bounds_min.x + (ix as Real) * dx;
-                let y = bounds_min.y + (iy as Real) * dy;
-                let z = bounds_min.z + (iz as Real) * dz;
-
-                let point = Point3::new(x, y, z);
-                let sdf_value = sdf(&point);
-
-                // Robust handling of infinite/NaN values
-                if sdf_value.is_finite() {
-                    (sdf_value - config.iso_value) as f32
-                } else {
-                    // Use large positive value for invalid samples
-                    1e10_f32
-                }
-            })
-            .enumerate()
-            .for_each(|(idx, value)| {
-                field_values[idx] = value;
-            });
-
-        // Configure surface nets with adaptive grid
-        let shape = AdaptiveGridShape { nx, ny, nz };
-
-        #[cfg(feature = "sdf")]
-        let mut surface_buffer = SurfaceNetsBuffer::default();
-
-        #[cfg(feature = "sdf")]
-        surface_nets(
-            &field_values,
-            &shape,
-            [0, 0, 0],
-            [nx - 1, ny - 1, nz - 1],
-            &mut surface_buffer,
+        // Create SVO with appropriate bounds and resolution
+        let center = Point3::new(
+            (min_pt.x + max_pt.x) * 0.5,
+            (min_pt.y + max_pt.y) * 0.5,
+            (min_pt.z + max_pt.z) * 0.5,
         );
+        let half = ((max_pt.x - min_pt.x) * 0.5)
+            .max((max_pt.y - min_pt.y) * 0.5)
+            .max((max_pt.z - min_pt.z) * 0.5);
 
-        // Convert surface nets output to polygons using iterator combinators
-    #[cfg(feature = "sdf")]
-    let polygons: Vec<Polygon<S>> = surface_buffer
-            .indices
-            .chunks_exact(3)
-            .filter_map(|triangle_indices| {
-                let [i0, i1, i2] = [triangle_indices[0] as usize, triangle_indices[1] as usize, triangle_indices[2] as usize];
+        // Determine appropriate SVO depth based on resolution
+        let max_res = resolution.0.max(resolution.1).max(resolution.2);
+        let svo_depth = (max_res as f32).log2().ceil() as u8;
 
-                // Extract positions and convert to world coordinates
-                let positions = [i0, i1, i2]
-                    .iter()
-                    .map(|&idx| {
-                        let pos = surface_buffer.positions[idx];
-                        Point3::new(
-                            bounds_min.x + pos[0] as Real * dx,
-                            bounds_min.y + pos[1] as Real * dy,
-                            bounds_min.z + pos[2] as Real * dz,
-                        )
-                    })
-                    .collect::<Vec<_>>();
+        let mut svo = Svo::new(center, half, svo_depth);
 
-                // Extract normals and convert to Vector3
-                let normals = [i0, i1, i2]
-                    .iter()
-                    .map(|&idx| {
-                        let normal = surface_buffer.normals[idx];
-                        Vector3::new(normal[0] as Real, normal[1] as Real, normal[2] as Real)
-                    })
-                    .collect::<Vec<_>>();
+        // Integrate BSP at surface-crossing cells
+        BspIntegrator::integrate_bsp_from_sdf(&mut svo, &sdf, iso_value);
 
-                // Validate all coordinates are finite
-                if positions.iter().all(validate_finite_point) && normals.iter().all(validate_finite_vector) {
-                    // Create vertices with validated data
-                    let vertices = positions
-                        .into_iter()
-                        .zip(normals)
-                        .map(|(pos, normal)| Vertex::new(pos, normal))
-                        .collect();
+        // Also generate surface polygons using Surface Nets for compatibility
+        let surface_polygons = Self::extract_surface_nets(&sdf, resolution, min_pt, max_pt, iso_value, metadata.clone());
 
-                    Some(Polygon::new(vertices, metadata.clone()))
-                } else {
-                    None
-                }
-            })
-            .collect();
+        // Create Voxels with both SVO and surface polygons
+        let mut voxels = Self::from_svo(svo, metadata);
 
-    #[cfg(not(feature = "sdf"))]
-    let polygons: Vec<Polygon<S>> = Vec::new();
+        // Cache the surface polygons for immediate use
+        voxels.set_surface_cache(surface_polygons);
 
-        // Create SvoMesh from generated polygons
-        let mut svo_mesh = Self::with_precision(config.precision);
-        svo_mesh.metadata = metadata;
+        voxels
+    }
 
-        if !polygons.is_empty() {
-            svo_mesh.insert_polygons(&polygons);
+    /// Extract surface polygons using Surface Nets (for compatibility and immediate surface access)
+    fn extract_surface_nets<F>(
+        sdf: &F,
+        resolution: (usize, usize, usize),
+        min_pt: Point3<Real>,
+        max_pt: Point3<Real>,
+        iso_value: Real,
+        metadata: Option<S>,
+    ) -> Vec<Polygon<S>>
+    where
+        F: Fn(&Point3<Real>) -> Real + Sync + Send,
+    {
+        let nx = resolution.0.max(2) as u32;
+        let ny = resolution.1.max(2) as u32;
+        let nz = resolution.2.max(2) as u32;
+
+        let dx = (max_pt.x - min_pt.x) / (nx as Real - 1.0);
+        let dy = (max_pt.y - min_pt.y) / (ny as Real - 1.0);
+        let dz = (max_pt.z - min_pt.z) / (nz as Real - 1.0);
+
+        let array_size = (nx * ny * nz) as usize;
+        let mut field_values = vec![0.0_f32; array_size];
+
+        #[inline]
+        fn point_finite(p: &Point3<Real>) -> bool { p.coords.iter().all(|&c| c.is_finite()) }
+
+        #[allow(clippy::unnecessary_cast)]
+        for i in 0..(nx * ny * nz) {
+            let iz = i / (nx * ny);
+            let remainder = i % (nx * ny);
+            let iy = remainder / nx;
+            let ix = remainder % nx;
+
+            let xf = min_pt.x + (ix as Real) * dx;
+            let yf = min_pt.y + (iy as Real) * dy;
+            let zf = min_pt.z + (iz as Real) * dz;
+
+            let p = Point3::new(xf, yf, zf);
+            let sdf_val = sdf(&p);
+            field_values[i as usize] = if sdf_val.is_finite() { (sdf_val - iso_value) as f32 } else { 1e10_f32 };
         }
 
-        svo_mesh
-    }
+        #[derive(Clone, Copy)]
+        struct GridShape { nx: u32, ny: u32, nz: u32 }
+        impl fast_surface_nets::ndshape::Shape<3> for GridShape {
+            type Coord = u32;
+            #[inline] fn as_array(&self) -> [Self::Coord; 3] { [self.nx, self.ny, self.nz] }
+            fn size(&self) -> Self::Coord { self.nx * self.ny * self.nz }
+            fn usize(&self) -> usize { (self.nx * self.ny * self.nz) as usize }
+            fn linearize(&self, c: [Self::Coord; 3]) -> u32 { (c[2] * self.ny + c[1]) * self.nx + c[0] }
+            fn delinearize(&self, i: u32) -> [Self::Coord; 3] {
+                let x = i % self.nx; let yz = i / self.nx; let y = yz % self.ny; let z = yz / self.ny; [x,y,z]
+            }
+        }
 
-    /// Create SvoMesh from SDF with default configuration
-    pub fn sdf_default<F>(
-        sdf: F,
-        bounds_min: Point3<Real>,
-        bounds_max: Point3<Real>,
-        metadata: Option<S>,
-    ) -> Self
-    where
-        F: Fn(&Point3<Real>) -> Real + Send + Sync,
-    {
-        Self::sdf(sdf, SdfConfig::default(), bounds_min, bounds_max, metadata)
-    }
+        let mut sn_buffer = SurfaceNetsBuffer::default();
+        let shape = GridShape { nx, ny, nz };
+        let max_x = nx - 1; let max_y = ny - 1; let max_z = nz - 1;
+        surface_nets(&field_values, &shape, [0,0,0], [max_x, max_y, max_z], &mut sn_buffer);
 
-    /// Create SvoMesh from SDF with custom resolution
-    pub fn sdf_with_resolution<F>(
-        sdf: F,
-        resolution: (usize, usize, usize),
-        bounds_min: Point3<Real>,
-        bounds_max: Point3<Real>,
-        metadata: Option<S>,
-    ) -> Self
-    where
-        F: Fn(&Point3<Real>) -> Real + Send + Sync,
-    {
-        let config = SdfConfig {
-            resolution,
-            ..SdfConfig::default()
-        };
-        Self::sdf(sdf, config, bounds_min, bounds_max, metadata)
-    }
-}
+        // Convert triangles into polygons
+        let mut triangles = Vec::with_capacity(sn_buffer.indices.len() / 3);
+        for tri in sn_buffer.indices.chunks_exact(3) {
+            let i0 = tri[0] as usize; let i1 = tri[1] as usize; let i2 = tri[2] as usize;
+            let p0i = sn_buffer.positions[i0]; let p1i = sn_buffer.positions[i1]; let p2i = sn_buffer.positions[i2];
+            let p0 = Point3::new(min_pt.x + p0i[0] as Real * dx, min_pt.y + p0i[1] as Real * dy, min_pt.z + p0i[2] as Real * dz);
+            let p1 = Point3::new(min_pt.x + p1i[0] as Real * dx, min_pt.y + p1i[1] as Real * dy, min_pt.z + p1i[2] as Real * dz);
+            let p2 = Point3::new(min_pt.x + p2i[0] as Real * dx, min_pt.y + p2i[1] as Real * dy, min_pt.z + p2i[2] as Real * dz);
+            if !(point_finite(&p0) && point_finite(&p1) && point_finite(&p2)) { continue; }
+            let n0 = sn_buffer.normals[i0]; let n1 = sn_buffer.normals[i1]; let n2 = sn_buffer.normals[i2];
+            let v0 = Vertex::new(p0, Vector3::new(n0[0] as Real, n0[1] as Real, n0[2] as Real));
+            let v1 = Vertex::new(p1, Vector3::new(n1[0] as Real, n1[1] as Real, n1[2] as Real));
+            let v2 = Vertex::new(p2, Vector3::new(n2[0] as Real, n2[1] as Real, n2[2] as Real));
+            triangles.push(Polygon::new(vec![v0, v1, v2], metadata.clone()));
+        }
 
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    use crate::traits::CSG;
-    use fast_surface_nets::ndshape::Shape;
-
-    #[test]
-    fn test_sdf_sphere() {
-        // Test sphere SDF: |p| - radius
-        let radius = 1.5;
-        let sphere_sdf = |p: &Point3<Real>| p.coords.norm() - radius;
-
-        let bounds_min = Point3::new(-2.0, -2.0, -2.0);
-        let bounds_max = Point3::new(2.0, 2.0, 2.0);
-
-        // Use very low resolution to avoid stack overflow in tests
-        let mesh = SvoMesh::<()>::sdf_with_resolution(
-            sphere_sdf,
-            (4, 4, 4),
-            bounds_min,
-            bounds_max,
-            None,
-        );
-
-        // Verify mesh was created
-        assert!(!mesh.polygons().is_empty());
-        
-        // Verify bounding box is reasonable for a sphere
-        let bbox = mesh.bounding_box();
-        // For a sphere centered at origin, the bounding box should be roughly symmetric
-        // and the maximum extent should be close to the radius
-        let max_extent = bbox.maxs.coords.norm();
-        let min_extent = bbox.mins.coords.norm();
-        
-        // The mesh should approximate the sphere reasonably well
-        assert!(max_extent <= radius + 0.5, "Max extent {} too large for radius {}", max_extent, radius);
-        assert!(min_extent <= radius + 0.5, "Min extent {} too large for radius {}", min_extent, radius);
-        
-        // Verify the mesh has reasonable size (not degenerate)
-        let size = bbox.maxs - bbox.mins;
-        assert!(size.x > 0.1 && size.y > 0.1 && size.z > 0.1, "Mesh too small: {:?}", size);
-    }
-
-    #[test]
-    fn test_sdf_config_validation() {
-        let config = SdfConfig::default();
-        assert_eq!(config.resolution, (32, 32, 32));
-        assert_eq!(config.iso_value, 0.0);
-        assert!(config.max_depth > 0);
-        assert!(config.min_cell_size > 0.0);
-    }
-
-    #[test]
-    fn test_finite_validation() {
-        let finite_point = Point3::new(1.0, 2.0, 3.0);
-        let infinite_point = Point3::new(Real::INFINITY, 2.0, 3.0);
-        let nan_point = Point3::new(Real::NAN, 2.0, 3.0);
-
-        assert!(validate_finite_point(&finite_point));
-        assert!(!validate_finite_point(&infinite_point));
-        assert!(!validate_finite_point(&nan_point));
-    }
-
-    #[test]
-    fn test_adaptive_grid_shape() {
-        let shape = AdaptiveGridShape { nx: 4, ny: 3, nz: 2 };
-        
-        assert_eq!(shape.as_array(), [4, 3, 2]);
-        assert_eq!(shape.size(), 24);
-        assert_eq!(shape.usize(), 24);
-        
-        // Test linearization/delinearization round trip
-        let coords = [1, 2, 1];
-        let linear = shape.linearize(coords);
-        let recovered = shape.delinearize(linear);
-        assert_eq!(coords, recovered);
-    }
-
-    #[test]
-    fn test_sdf_with_custom_resolution() {
-        let plane_sdf = |p: &Point3<Real>| p.z; // z = 0 plane
-        
-        let bounds_min = Point3::new(-1.0, -1.0, -1.0);
-        let bounds_max = Point3::new(1.0, 1.0, 1.0);
-        
-        let mesh = SvoMesh::<()>::sdf_with_resolution(
-            plane_sdf,
-            (8, 8, 8),
-            bounds_min,
-            bounds_max,
-            None,
-        );
-        
-        // Should generate polygons for the z=0 plane
-        assert!(!mesh.polygons().is_empty());
+        triangles
     }
 }
+

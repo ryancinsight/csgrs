@@ -14,6 +14,8 @@ use core2::io::Cursor;
 #[cfg(feature = "stl-io")]
 use stl_io;
 
+use crate::voxels::csg::Voxels;
+
 impl<S: Clone + Debug + Send + Sync> Mesh<S> {
     /// Export to ASCII STL
     /// Convert this Mesh to an **ASCII STL** string with the given `name`.
@@ -176,8 +178,63 @@ impl<S: Clone + Debug + Send + Sync> Mesh<S> {
         }
 
         Ok(Mesh::from_polygons(&polygons, metadata))
+
     }
 }
+
+
+impl<S: Clone + Debug + Send + Sync> Voxels<S> {
+    /// Export this Voxels to an ASCII STL string
+    pub fn to_stl_ascii(&self, name: &str) -> String {
+        let mut out = String::new();
+        out.push_str(&format!("solid {name}\n"));
+        for poly in self.polygons() {
+            let normal = poly.plane.normal().normalize();
+            for tri in poly.triangulate() {
+                out.push_str(&format!(
+                    "  facet normal {:.6} {:.6} {:.6}\n",
+                    normal.x, normal.y, normal.z
+                ));
+                out.push_str("    outer loop\n");
+                for v in &tri {
+                    out.push_str(&format!(
+                        "      vertex {:.6} {:.6} {:.6}\n",
+                        v.pos.x, v.pos.y, v.pos.z
+                    ));
+                }
+                out.push_str("    endloop\n");
+                out.push_str("  endfacet\n");
+            }
+        }
+        out.push_str(&format!("endsolid {name}\n"));
+        out
+    }
+
+    /// Export this Voxels to a binary STL buffer
+    #[cfg(feature = "stl-io")]
+    pub fn to_stl_binary(&self, _name: &str) -> std::io::Result<Vec<u8>> {
+        use core2::io::Cursor;
+        use stl_io::{Normal, Triangle, Vertex, write_stl};
+        let mut triangles = Vec::new();
+        for poly in self.polygons() {
+            let normal = poly.plane.normal().normalize();
+            for tri in poly.triangulate() {
+                triangles.push(Triangle {
+                    normal: Normal::new([normal.x as f32, normal.y as f32, normal.z as f32]),
+                    vertices: [
+                        Vertex::new([tri[0].pos.x as f32, tri[0].pos.y as f32, tri[0].pos.z as f32]),
+                        Vertex::new([tri[1].pos.x as f32, tri[1].pos.y as f32, tri[1].pos.z as f32]),
+                        Vertex::new([tri[2].pos.x as f32, tri[2].pos.y as f32, tri[2].pos.z as f32]),
+                    ],
+                });
+            }
+        }
+        let mut cursor = Cursor::new(Vec::new());
+        write_stl(&mut cursor, triangles.iter())?;
+        Ok(cursor.into_inner())
+    }
+}
+
 
 impl<S: Clone + Debug + Send + Sync> Sketch<S> {
     /// Export to ASCII STL
