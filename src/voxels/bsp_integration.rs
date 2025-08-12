@@ -72,19 +72,38 @@ impl BspIntegrator {
             }
         }
         
-        // Recursively process children if not at max depth
-        if depth < max_depth {
+        // Apply advanced termination criteria before recursing
+        if !Self::should_terminate_subdivision(
+            depth,
+            max_depth,
+            half,
+            node_polygons.len(),
+            None, // No corner values for polygon-based subdivision
+            0.0,  // No iso_value for polygon-based subdivision
+        ) {
+            // Only recurse if we have children and sufficient complexity
             for child_idx in 0..8 {
                 if let Some(child) = node.get_child_mut(child_idx) {
                     let child_center = Self::child_center(center, half, child_idx);
-                    Self::integrate_node_bsp(
-                        child,
-                        &child_center,
-                        half * 0.5,
-                        depth + 1,
-                        max_depth,
+
+                    // Filter polygons for this child to avoid unnecessary work
+                    let child_polygons = Self::filter_polygons_in_bounds(
                         &node_polygons,
+                        &child_center,
+                        half * 0.5
                     );
+
+                    // Only recurse if child has polygons
+                    if !child_polygons.is_empty() {
+                        Self::integrate_node_bsp(
+                            child,
+                            &child_center,
+                            half * 0.5,
+                            depth + 1,
+                            max_depth,
+                            &child_polygons,
+                        );
+                    }
                 }
             }
         }
@@ -197,20 +216,30 @@ impl BspIntegrator {
             node.occupancy = Occupancy::Full;
         }
         
-        // Recursively process children
-        if depth < max_depth {
-            for child_idx in 0..8 {
-                let child = node.ensure_child(child_idx);
-                let child_center = Self::child_center(center, half, child_idx);
-                Self::integrate_sdf_node_bsp(
-                    child,
-                    &child_center,
-                    half * 0.5,
-                    depth + 1,
-                    max_depth,
-                    sdf,
-                    iso_value,
-                );
+        // Apply advanced termination criteria before recursing
+        if !Self::should_terminate_subdivision(
+            depth,
+            max_depth,
+            half,
+            0, // No polygon count for SDF-based subdivision
+            Some(&corner_values),
+            iso_value,
+        ) {
+            // Only create children for Mixed nodes that need further subdivision
+            if node.occupancy == Occupancy::Mixed {
+                for child_idx in 0..8 {
+                    let child = node.ensure_child(child_idx);
+                    let child_center = Self::child_center(center, half, child_idx);
+                    Self::integrate_sdf_node_bsp(
+                        child,
+                        &child_center,
+                        half * 0.5,
+                        depth + 1,
+                        max_depth,
+                        sdf,
+                        iso_value,
+                    );
+                }
             }
         }
     }
@@ -314,6 +343,82 @@ impl BspIntegrator {
 
         cross.norm_squared() > 1e-12 // Non-zero area threshold
     }
+
+    /// Advanced termination criteria for recursive subdivision
+    ///
+    /// This function implements multiple termination criteria to prevent
+    /// unnecessary subdivision and improve performance while maintaining quality.
+    ///
+    /// **Termination Criteria**:
+    /// 1. Maximum depth reached
+    /// 2. Minimum cell size threshold
+    /// 3. Low polygon count (insufficient detail to warrant subdivision)
+    /// 4. Uniform occupancy (all corners have same sign)
+    /// 5. Low surface complexity (simple geometry doesn't need deep subdivision)
+    pub fn should_terminate_subdivision(
+        depth: u8,
+        max_depth: u8,
+        half_size: Real,
+        polygon_count: usize,
+        corner_values: Option<&[Real]>,
+        iso_value: Real,
+    ) -> bool {
+        // Criterion 1: Maximum depth reached
+        if depth >= max_depth {
+            return true;
+        }
+
+        // Criterion 2: Minimum cell size threshold (prevent infinite subdivision)
+        const MIN_CELL_SIZE: Real = 1e-6;
+        if half_size < MIN_CELL_SIZE {
+            return true;
+        }
+
+        // Criterion 3: Low polygon count threshold
+        const MIN_POLYGON_COUNT: usize = 2;
+        if polygon_count < MIN_POLYGON_COUNT {
+            return true;
+        }
+
+        // Criterion 4: Uniform occupancy check (for SDF-based subdivision)
+        if let Some(values) = corner_values {
+            let has_positive = values.iter().any(|&v| v > iso_value);
+            let has_negative = values.iter().any(|&v| v < iso_value);
+
+            // If all corners have the same sign, no surface crossing
+            if !has_positive || !has_negative {
+                return true;
+            }
+
+            // Criterion 5: Low surface complexity check
+            // If the SDF variation is very small, the surface is nearly flat
+            let min_val = values.iter().fold(Real::MAX, |a, &b| a.min(b));
+            let max_val = values.iter().fold(Real::MIN, |a, &b| a.max(b));
+            let variation = (max_val - min_val).abs();
+
+            const MIN_VARIATION_THRESHOLD: Real = 1e-4;
+            if variation < MIN_VARIATION_THRESHOLD {
+                return true;
+            }
+        }
+
+        // Criterion 6: Adaptive depth based on cell size
+        // For very large cells, allow deeper subdivision
+        // For small cells, terminate earlier to prevent over-subdivision
+        let adaptive_max_depth = if half_size > 1.0 {
+            max_depth + 2 // Allow deeper subdivision for large cells
+        } else if half_size < 0.1 {
+            max_depth.saturating_sub(2) // Terminate earlier for small cells
+        } else {
+            max_depth
+        };
+
+        if depth >= adaptive_max_depth {
+            return true;
+        }
+
+        false
+    }
 }
 
 #[cfg(test)]
@@ -333,10 +438,131 @@ mod tests {
     fn integrate_sdf_sphere() {
         let mut svo: Svo<()> = Svo::new(Point3::origin(), 2.0, 4);
         let sphere_sdf = |p: &Point3<Real>| p.coords.norm() - 1.0;
-        
+
         BspIntegrator::integrate_bsp_from_sdf(&mut svo, sphere_sdf, 0.0);
-        
+
         // Should have created Mixed cells at surface crossings
         // Detailed verification would require traversing the SVO
+    }
+
+    #[test]
+    fn test_termination_criteria_max_depth() {
+        // Test maximum depth termination
+        assert!(BspIntegrator::should_terminate_subdivision(5, 4, 1.0, 10, None, 0.0));
+        assert!(!BspIntegrator::should_terminate_subdivision(3, 4, 1.0, 10, None, 0.0));
+    }
+
+    #[test]
+    fn test_termination_criteria_min_cell_size() {
+        // Test minimum cell size termination (MIN_CELL_SIZE = 1e-6)
+        // Use depth=1 and max_depth=10 to avoid other termination criteria
+        assert!(BspIntegrator::should_terminate_subdivision(1, 10, 1e-7, 10, None, 0.0)); // Below threshold
+        assert!(!BspIntegrator::should_terminate_subdivision(1, 10, 1e-5, 10, None, 0.0)); // Above threshold
+    }
+
+    #[test]
+    fn test_termination_criteria_polygon_count() {
+        // Test low polygon count termination
+        assert!(BspIntegrator::should_terminate_subdivision(2, 4, 1.0, 1, None, 0.0));
+        assert!(!BspIntegrator::should_terminate_subdivision(2, 4, 1.0, 5, None, 0.0));
+    }
+
+    #[test]
+    fn test_termination_criteria_uniform_occupancy() {
+        // Test uniform occupancy (all positive)
+        let all_positive = vec![1.0, 2.0, 3.0, 4.0, 5.0, 6.0, 7.0, 8.0];
+        assert!(BspIntegrator::should_terminate_subdivision(2, 4, 1.0, 10, Some(&all_positive), 0.0));
+
+        // Test uniform occupancy (all negative)
+        let all_negative = vec![-1.0, -2.0, -3.0, -4.0, -5.0, -6.0, -7.0, -8.0];
+        assert!(BspIntegrator::should_terminate_subdivision(2, 4, 1.0, 10, Some(&all_negative), 0.0));
+
+        // Test mixed occupancy (should not terminate)
+        let mixed = vec![-1.0, 1.0, -2.0, 2.0, -3.0, 3.0, -4.0, 4.0];
+        assert!(!BspIntegrator::should_terminate_subdivision(2, 4, 1.0, 10, Some(&mixed), 0.0));
+    }
+
+    #[test]
+    fn test_termination_criteria_low_variation() {
+        // Test low surface complexity (small variation)
+        let low_variation = vec![0.0001, 0.0002, 0.0001, 0.0002, 0.0001, 0.0002, 0.0001, 0.0002];
+        assert!(BspIntegrator::should_terminate_subdivision(2, 4, 1.0, 10, Some(&low_variation), 0.0));
+
+        // Test high variation (should not terminate)
+        let high_variation = vec![-1.0, 1.0, -2.0, 2.0, -3.0, 3.0, -4.0, 4.0];
+        assert!(!BspIntegrator::should_terminate_subdivision(2, 4, 1.0, 10, Some(&high_variation), 0.0));
+    }
+
+    #[test]
+    fn test_termination_criteria_adaptive_depth() {
+        // Test adaptive depth for large cells (should allow deeper subdivision)
+        // For half_size > 1.0, adaptive_max_depth = max_depth + 2 = 6 + 2 = 8
+        assert!(!BspIntegrator::should_terminate_subdivision(5, 6, 2.0, 10, None, 0.0)); // depth 5 < 8
+        assert!(BspIntegrator::should_terminate_subdivision(8, 6, 2.0, 10, None, 0.0)); // depth 8 >= 8
+
+        // Test adaptive depth for small cells (should terminate earlier)
+        // For half_size < 0.1, adaptive_max_depth = max_depth - 2 = 6 - 2 = 4
+        assert!(BspIntegrator::should_terminate_subdivision(4, 6, 0.05, 10, None, 0.0)); // depth 4 >= 4
+        assert!(!BspIntegrator::should_terminate_subdivision(3, 6, 0.05, 10, None, 0.0)); // depth 3 < 4
+    }
+
+    #[test]
+    fn test_recursive_termination_prevents_infinite_subdivision() {
+        // Create a pathological SDF that could cause infinite subdivision
+        let pathological_sdf = |p: &Point3<Real>| {
+            // SDF that has very fine detail but should terminate due to size limits
+            (p.x * 1000.0).sin() * 0.001
+        };
+
+        let mut svo: Svo<()> = Svo::new(Point3::origin(), 1.0, 10);
+
+        // This should not hang or cause stack overflow
+        BspIntegrator::integrate_bsp_from_sdf(&mut svo, pathological_sdf, 0.0);
+
+        // Should complete without issues
+        assert!(svo.root.occupancy != Occupancy::Empty); // Should have some structure
+    }
+
+    #[test]
+    fn test_polygon_filtering_optimization() {
+        use crate::voxels::vertex::Vertex;
+        use nalgebra::Vector3;
+
+        // Create polygons that are far from the center
+        let far_polygons = vec![
+            Polygon::<()>::new(vec![
+                Vertex::new(Point3::new(10.0, 10.0, 10.0), Vector3::new(0.0, 0.0, 1.0)),
+                Vertex::new(Point3::new(11.0, 10.0, 10.0), Vector3::new(0.0, 0.0, 1.0)),
+                Vertex::new(Point3::new(10.5, 11.0, 10.0), Vector3::new(0.0, 0.0, 1.0)),
+            ], None),
+        ];
+
+        // Filter polygons for a small cell at origin
+        let filtered = BspIntegrator::filter_polygons_in_bounds(
+            &far_polygons,
+            &Point3::origin(),
+            0.5
+        );
+
+        // Should filter out polygons that don't intersect the cell
+        assert!(filtered.is_empty(), "Far polygons should be filtered out");
+
+        // Create polygons that intersect the cell
+        let near_polygons = vec![
+            Polygon::<()>::new(vec![
+                Vertex::new(Point3::new(-0.1, -0.1, -0.1), Vector3::new(0.0, 0.0, 1.0)),
+                Vertex::new(Point3::new(0.1, -0.1, -0.1), Vector3::new(0.0, 0.0, 1.0)),
+                Vertex::new(Point3::new(0.0, 0.1, -0.1), Vector3::new(0.0, 0.0, 1.0)),
+            ], None),
+        ];
+
+        let filtered_near = BspIntegrator::filter_polygons_in_bounds(
+            &near_polygons,
+            &Point3::origin(),
+            0.5
+        );
+
+        // Should keep polygons that intersect the cell
+        assert!(!filtered_near.is_empty(), "Near polygons should not be filtered out");
     }
 }

@@ -336,15 +336,13 @@ fn main() {
     #[cfg(all(feature = "stl-io", feature = "sdf"))]
     {
         use csgrs::voxels::csg::Voxels;
-        use csgrs::voxels::shapes::*; // Bring shape fns into scope
-        use csgrs::voxels::tpms::*;   // Bring TPMS fns into scope
 
-        // cube_voxel.stl - using new SVO-based voxelization
-        let cube_voxel: Voxels<()> = Voxels::cube_voxelized(2.0, 6, None);
+        // cube_voxel.stl - using clean API that matches mesh API
+        let cube_voxel: Voxels<()> = Voxels::cube(2.0, None);
         let _ = fs::write("stl/cube_voxel.stl", cube_voxel.to_stl_ascii("cube_voxel"));
 
-        // cylinder_voxel.stl - using new SVO-based voxelization
-        let cylinder_voxel: Voxels<()> = Voxels::cylinder_voxelized(1.0, 2.0, 6, None);
+        // cylinder_voxel.stl - using clean API that matches mesh API
+        let cylinder_voxel: Voxels<()> = Voxels::cylinder(1.0, 2.0, 32, None);
         let _ = fs::write("stl/cylinder_voxel.stl", cylinder_voxel.to_stl_ascii("cylinder_voxel"));
 
         // gyroid_sphere_voxel.stl: gyroid intersected with a sphere boundary
@@ -365,6 +363,89 @@ fn main() {
             "stl/gyroid_sphere_voxel.stl",
             gyroid_sphere.to_stl_ascii("gyroid_sphere_voxel"),
         );
+    }
+
+    // Comprehensive CSG Boolean Operations with Voxels
+    #[cfg(all(feature = "stl-io", feature = "sdf"))]
+    {
+        use csgrs::voxels::csg::Voxels;
+        use csgrs::traits::CSG;
+
+        println!("=== Voxel CSG Boolean Operations ===");
+
+        // Create base shapes for CSG operations with same bounds for easier CSG
+        let sphere: Voxels<()> = Voxels::sphere(1.0, 16, 8, None);
+        let cube: Voxels<()> = Voxels::cube(1.5, None);
+
+        println!("Sphere polygons: {}", sphere.polygons().len());
+        println!("Cube polygons: {}", cube.polygons().len());
+
+        // Debug: Check SVO bounds
+        println!("Sphere SVO: center={:?}, half={}", sphere.svo().center, sphere.svo().half);
+        println!("Cube SVO: center={:?}, half={}", cube.svo().center, cube.svo().half);
+
+        // Debug: Check SVO properties
+        println!("Same center: {}", (sphere.svo().center - cube.svo().center).norm() < 1e-6);
+        println!("Overlapping bounds: {}", sphere.svo().half > 0.0 && cube.svo().half > 0.0);
+
+        // 1. Union Operations
+        println!("Computing union operations...");
+
+        let sphere_union_cube = sphere.union(&cube);
+        let cube_union_sphere = cube.union(&sphere);
+
+        println!("Sphere ∪ Cube polygons: {}", sphere_union_cube.polygons().len());
+        println!("Cube ∪ Sphere polygons: {}", cube_union_sphere.polygons().len());
+
+        // Debug: Check if union result has proper structure
+        println!("Union result SVO: center={:?}, half={}", sphere_union_cube.svo().center, sphere_union_cube.svo().half);
+        println!("Union result root occupancy: {:?}", sphere_union_cube.svo().root.occupancy);
+
+        let _ = fs::write("stl/voxel_sphere_union_cube.stl", sphere_union_cube.to_stl_ascii("sphere_union_cube"));
+        let _ = fs::write("stl/voxel_cube_union_sphere.stl", cube_union_sphere.to_stl_ascii("cube_union_sphere"));
+
+        // 2. Intersection Operations
+        println!("Computing intersection operations...");
+
+        let sphere_intersect_cube = sphere.intersection(&cube);
+        let cube_intersect_sphere = cube.intersection(&sphere);
+
+        println!("Sphere ∩ Cube polygons: {}", sphere_intersect_cube.polygons().len());
+        println!("Cube ∩ Sphere polygons: {}", cube_intersect_sphere.polygons().len());
+
+        let _ = fs::write("stl/voxel_sphere_intersect_cube.stl", sphere_intersect_cube.to_stl_ascii("sphere_intersect_cube"));
+        let _ = fs::write("stl/voxel_cube_intersect_sphere.stl", cube_intersect_sphere.to_stl_ascii("cube_intersect_sphere"));
+
+        // 3. Difference Operations (Subtraction)
+        println!("Computing difference operations...");
+
+        let sphere_minus_cube = sphere.difference(&cube);
+        let cube_minus_sphere = cube.difference(&sphere);
+
+        println!("Sphere - Cube polygons: {}", sphere_minus_cube.polygons().len());
+        println!("Cube - Sphere polygons: {}", cube_minus_sphere.polygons().len());
+
+        let _ = fs::write("stl/voxel_sphere_minus_cube.stl", sphere_minus_cube.to_stl_ascii("sphere_minus_cube"));
+        let _ = fs::write("stl/voxel_cube_minus_sphere.stl", cube_minus_sphere.to_stl_ascii("cube_minus_sphere"));
+
+        // 4. Complex CSG Operations
+        println!("Computing complex CSG operations...");
+
+        // Create a cylinder for more complex operations
+        let cylinder: Voxels<()> = Voxels::cylinder(0.8, 2.0, 16, None);
+
+        // Complex operation: (Cube ∪ Sphere) - Cylinder
+        let complex_shape = cube.union(&sphere).difference(&cylinder);
+        println!("(Cube ∪ Sphere) - Cylinder polygons: {}", complex_shape.polygons().len());
+        let _ = fs::write("stl/voxel_complex_csg.stl", complex_shape.to_stl_ascii("complex_csg"));
+
+        // Performance and quality metrics
+        println!("\n=== CSG Performance Metrics ===");
+        println!("Sphere statistics: {:?}", sphere.statistics());
+        println!("Cube statistics: {:?}", cube.statistics());
+        println!("Union result statistics: {:?}", sphere_union_cube.statistics());
+
+        println!("=== Voxel CSG Operations Complete ===");
     }
 
     // 1) Create a cylinder (start=-1, end=+1) with radius=1, 32 slices

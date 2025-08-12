@@ -45,6 +45,49 @@ impl<S: Clone + Send + Sync> Polygon<S> {
         })
     }
 
+    /// Calculate the surface area of this polygon
+    ///
+    /// Uses the shoelace formula for triangulation-based area calculation.
+    /// For non-triangular polygons, triangulates from the first vertex.
+    ///
+    /// **Mathematical Foundation**:
+    /// Area = 0.5 * |∑(v_i × v_{i+1})| for triangulated polygon
+    pub fn surface_area(&self) -> Real {
+        if self.vertices.len() < 3 {
+            return 0.0;
+        }
+
+        if self.vertices.len() == 3 {
+            // Triangle case - direct calculation
+            let v0 = &self.vertices[0].pos;
+            let v1 = &self.vertices[1].pos;
+            let v2 = &self.vertices[2].pos;
+
+            let edge1 = v1 - v0;
+            let edge2 = v2 - v0;
+            let cross = edge1.cross(&edge2);
+
+            return cross.norm() * 0.5;
+        }
+
+        // For polygons with more than 3 vertices, triangulate from first vertex
+        let mut total_area = 0.0;
+        let v0 = &self.vertices[0].pos;
+
+        for i in 1..self.vertices.len() - 1 {
+            let v1 = &self.vertices[i].pos;
+            let v2 = &self.vertices[i + 1].pos;
+
+            let edge1 = v1 - v0;
+            let edge2 = v2 - v0;
+            let cross = edge1.cross(&edge2);
+
+            total_area += cross.norm() * 0.5;
+        }
+
+        total_area
+    }
+
     pub fn flip(&mut self) {
         self.vertices.reverse();
         for v in &mut self.vertices { v.flip(); }

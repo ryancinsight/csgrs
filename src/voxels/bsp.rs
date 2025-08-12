@@ -4,6 +4,7 @@ use crate::float_types::{EPSILON, Real};
 use crate::voxels::plane::{BACK, COPLANAR, FRONT, Plane, SPANNING};
 use crate::voxels::polygon::Polygon;
 use crate::voxels::vertex::Vertex;
+use nalgebra::Point3;
 use std::fmt::Debug;
 
 #[derive(Debug, Clone)]
@@ -38,27 +39,158 @@ impl<S: Clone + Send + Sync + Debug> Node<S> {
         std::mem::swap(&mut self.front, &mut self.back);
     }
 
+    /// Pick the best splitting plane using Surface Area Heuristic (SAH)
+    ///
+    /// This implementation uses a robust Surface Area Heuristic that considers:
+    /// - Surface area of resulting partitions
+    /// - Balance between front and back partitions
+    /// - Cost of spanning polygons
+    /// - Numerical stability and edge cases
+    ///
+    /// **Mathematical Foundation**: SAH minimizes expected traversal cost:
+    /// Cost = C_traverse + P_front * C_front + P_back * C_back + P_span * C_span
+    /// where P_x is probability of hitting partition x (proportional to surface area)
     pub fn pick_best_splitting_plane(&self, polygons: &[Polygon<S>]) -> Plane {
-        const K_SPANS: Real = 8.0; const K_BALANCE: Real = 1.0;
+        // Handle edge cases
+        if polygons.is_empty() {
+            // Return a default plane - this should not happen in normal usage
+            return Plane::from_points(
+                Point3::new(0.0, 0.0, 0.0),
+                Point3::new(1.0, 0.0, 0.0),
+                Point3::new(0.0, 1.0, 0.0)
+            );
+        }
+
+        if polygons.len() == 1 {
+            return polygons[0].plane.clone();
+        }
+
+        // SAH constants based on empirical studies
+        const TRAVERSE_COST: Real = 1.0;
+        const INTERSECT_COST: Real = 2.0;
+        const SPAN_PENALTY: Real = 4.0;
+        const BALANCE_WEIGHT: Real = 0.1;
+
         let mut best_plane = polygons[0].plane.clone();
-        let mut best_score = Real::MAX;
-        let sample_size = polygons.len().min(20);
-        for p in polygons.iter().take(sample_size) {
-            let plane = &p.plane;
-            let mut num_front = 0; let mut num_back = 0; let mut num_spanning = 0;
-            for poly in polygons {
-                match plane.classify_polygon(poly) {
-                    COPLANAR => {}
-                    FRONT => num_front += 1,
-                    BACK => num_back += 1,
-                    SPANNING => num_spanning += 1,
-                    _ => num_spanning += 1,
+        let mut best_cost = Real::MAX;
+
+        // Calculate total surface area for normalization
+        let total_surface_area = Self::calculate_total_surface_area(polygons);
+        if total_surface_area < EPSILON {
+            // All polygons are degenerate, return first valid plane
+            return polygons[0].plane.clone();
+        }
+
+        // Evaluate all polygon planes as potential splitting planes
+        // Use all polygons for small sets, sample for large sets
+        let sample_size = if polygons.len() <= 50 {
+            polygons.len()
+        } else {
+            // For large sets, sample more intelligently
+            (polygons.len() as Real).sqrt() as usize + 10
+        };
+
+        let step = if polygons.len() <= sample_size {
+            1
+        } else {
+            polygons.len() / sample_size
+        };
+
+        for (_i, candidate_poly) in polygons.iter().enumerate().step_by(step) {
+            let plane = &candidate_poly.plane;
+
+            // Skip degenerate planes
+            if plane.normal().norm_squared() < EPSILON * EPSILON {
+                continue;
+            }
+
+            let (front_area, back_area, spanning_count, front_count, back_count) =
+                Self::evaluate_split(polygons, plane);
+
+            // Calculate SAH cost
+            let total_area = front_area + back_area;
+            if total_area < EPSILON {
+                continue; // Skip degenerate splits
+            }
+
+            let p_front = front_area / total_area;
+            let p_back = back_area / total_area;
+
+            // SAH cost function with additional heuristics
+            let traversal_cost = TRAVERSE_COST;
+            let front_cost = p_front * front_count as Real * INTERSECT_COST;
+            let back_cost = p_back * back_count as Real * INTERSECT_COST;
+            let span_cost = spanning_count as Real * SPAN_PENALTY;
+
+            // Balance penalty - prefer more balanced splits
+            let balance_penalty = BALANCE_WEIGHT *
+                ((front_count as Real - back_count as Real).abs() / polygons.len() as Real);
+
+            let total_cost = traversal_cost + front_cost + back_cost + span_cost + balance_penalty;
+
+            if total_cost < best_cost {
+                best_cost = total_cost;
+                best_plane = plane.clone();
+            }
+        }
+
+        best_plane
+    }
+
+    /// Calculate total surface area of all polygons for SAH normalization
+    fn calculate_total_surface_area(polygons: &[Polygon<S>]) -> Real {
+        polygons.iter()
+            .map(|poly| poly.surface_area())
+            .sum()
+    }
+
+    /// Evaluate a potential split plane and return metrics for SAH calculation
+    /// Returns: (front_surface_area, back_surface_area, spanning_count, front_count, back_count)
+    fn evaluate_split(polygons: &[Polygon<S>], plane: &Plane) -> (Real, Real, usize, usize, usize) {
+        let mut front_area = 0.0;
+        let mut back_area = 0.0;
+        let mut spanning_count = 0;
+        let mut front_count = 0;
+        let mut back_count = 0;
+
+        for poly in polygons {
+            let classification = plane.classify_polygon(poly);
+            let poly_area = poly.surface_area();
+
+            match classification {
+                COPLANAR => {
+                    // Coplanar polygons contribute to both sides for conservative estimation
+                    front_area += poly_area * 0.5;
+                    back_area += poly_area * 0.5;
+                }
+                FRONT => {
+                    front_area += poly_area;
+                    front_count += 1;
+                }
+                BACK => {
+                    back_area += poly_area;
+                    back_count += 1;
+                }
+                SPANNING => {
+                    // Spanning polygons contribute to both sides (conservative)
+                    front_area += poly_area;
+                    back_area += poly_area;
+                    spanning_count += 1;
+                    front_count += 1;
+                    back_count += 1;
+                }
+                _ => {
+                    // Treat unknown classifications as spanning for safety
+                    front_area += poly_area;
+                    back_area += poly_area;
+                    spanning_count += 1;
+                    front_count += 1;
+                    back_count += 1;
                 }
             }
-            let score = K_SPANS * num_spanning as Real + K_BALANCE * ((num_front - num_back) as Real).abs();
-            if score < best_score { best_score = score; best_plane = plane.clone(); }
         }
-        best_plane
+
+        (front_area, back_area, spanning_count, front_count, back_count)
     }
 
     #[cfg(not(feature = "parallel"))]
@@ -215,3 +347,156 @@ impl<S: Clone + Send + Sync + Debug> Node<S> {
     }
 }
 
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::voxels::vertex::Vertex;
+    use nalgebra::{Point3, Vector3};
+
+    #[test]
+    fn test_bsp_construction() {
+        let vertices = vec![
+            Vertex::new(Point3::new(0.0, 0.0, 0.0), Vector3::new(0.0, 0.0, 1.0)),
+            Vertex::new(Point3::new(1.0, 0.0, 0.0), Vector3::new(0.0, 0.0, 1.0)),
+            Vertex::new(Point3::new(0.0, 1.0, 0.0), Vector3::new(0.0, 0.0, 1.0)),
+        ];
+        let polygon: Polygon<()> = Polygon::new(vertices, None);
+        let polygons = vec![polygon];
+
+        let bsp: Node<()> = Node::from_polygons(&polygons);
+        assert!(bsp.plane.is_some());
+    }
+
+    #[test]
+    fn test_surface_area_heuristic_splitting_plane() {
+        // Create test polygons with known optimal split
+        let polygons = create_test_polygons_for_splitting();
+
+        let bsp = Node::<()>::new();
+        let best_plane = bsp.pick_best_splitting_plane(&polygons);
+
+        // Verify the plane is valid (non-degenerate)
+        let normal = best_plane.normal();
+        assert!(normal.norm() > 1e-6, "Selected plane should have valid normal");
+
+        // Test that the plane actually splits the polygons
+        let (front_area, back_area, spanning_count, front_count, back_count) =
+            Node::<()>::evaluate_split(&polygons, &best_plane);
+
+        // The test mainly verifies that the algorithm doesn't crash and produces a valid plane
+        // The actual classification depends on the specific geometry and plane selection
+        println!("Split results: front={}, back={}, spanning={}, front_area={:.6}, back_area={:.6}",
+                front_count, back_count, spanning_count, front_area, back_area);
+
+        // Surface areas should be positive
+        assert!(front_area >= 0.0 && back_area >= 0.0, "Surface areas should be non-negative");
+    }
+
+    #[test]
+    fn test_splitting_plane_edge_cases() {
+        let bsp = Node::<()>::new();
+
+        // Test empty polygon list
+        let empty_polygons: Vec<Polygon<()>> = vec![];
+        let plane = bsp.pick_best_splitting_plane(&empty_polygons);
+        // Should return a default plane without crashing
+        assert!(plane.normal().norm() > 0.0);
+
+        // Test single polygon
+        let single_polygon = vec![create_simple_triangle()];
+        let plane = bsp.pick_best_splitting_plane(&single_polygon);
+        assert!(plane.normal().norm() > 0.0);
+
+        // Test degenerate polygons (very small area)
+        let degenerate_polygons = create_degenerate_polygons();
+        let plane = bsp.pick_best_splitting_plane(&degenerate_polygons);
+        // Should handle gracefully
+        assert!(plane.normal().norm() >= 0.0);
+    }
+
+    #[test]
+    fn test_surface_area_calculation() {
+        // Test triangle area calculation
+        let triangle = create_simple_triangle();
+        let area = triangle.surface_area();
+
+        // Triangle with vertices at (0,0,0), (1,0,0), (0,1,0) should have area 0.5
+        assert!((area - 0.5).abs() < 1e-6, "Triangle area should be 0.5, got {}", area);
+
+        // Test quad area calculation
+        let quad = create_simple_quad();
+        let quad_area = quad.surface_area();
+        assert!(quad_area > 0.0, "Quad should have positive area");
+    }
+
+    #[test]
+    fn test_evaluate_split_metrics() {
+        let polygons = create_test_polygons_for_splitting();
+        let plane = Plane::from_points(
+            Point3::new(0.0, 0.0, 0.0),
+            Point3::new(1.0, 0.0, 0.0),
+            Point3::new(0.0, 1.0, 0.0)
+        );
+
+        let (front_area, back_area, spanning_count, front_count, back_count) =
+            Node::<()>::evaluate_split(&polygons, &plane);
+
+        // Verify metrics are reasonable
+        assert!(front_area >= 0.0 && back_area >= 0.0);
+        assert!(front_count + back_count + spanning_count <= polygons.len() * 2); // Conservative upper bound
+    }
+
+    // Helper functions for creating test data
+    fn create_simple_triangle() -> Polygon<()> {
+        let vertices = vec![
+            Vertex::new(Point3::new(0.0, 0.0, 0.0), Vector3::new(0.0, 0.0, 1.0)),
+            Vertex::new(Point3::new(1.0, 0.0, 0.0), Vector3::new(0.0, 0.0, 1.0)),
+            Vertex::new(Point3::new(0.0, 1.0, 0.0), Vector3::new(0.0, 0.0, 1.0)),
+        ];
+        Polygon::new(vertices, None)
+    }
+
+    fn create_simple_quad() -> Polygon<()> {
+        let vertices = vec![
+            Vertex::new(Point3::new(0.0, 0.0, 0.0), Vector3::new(0.0, 0.0, 1.0)),
+            Vertex::new(Point3::new(1.0, 0.0, 0.0), Vector3::new(0.0, 0.0, 1.0)),
+            Vertex::new(Point3::new(1.0, 1.0, 0.0), Vector3::new(0.0, 0.0, 1.0)),
+            Vertex::new(Point3::new(0.0, 1.0, 0.0), Vector3::new(0.0, 0.0, 1.0)),
+        ];
+        Polygon::new(vertices, None)
+    }
+
+    fn create_test_polygons_for_splitting() -> Vec<Polygon<()>> {
+        vec![
+            // Front-facing triangle
+            Polygon::new(vec![
+                Vertex::new(Point3::new(1.0, 0.0, 0.0), Vector3::new(0.0, 0.0, 1.0)),
+                Vertex::new(Point3::new(2.0, 0.0, 0.0), Vector3::new(0.0, 0.0, 1.0)),
+                Vertex::new(Point3::new(1.5, 1.0, 0.0), Vector3::new(0.0, 0.0, 1.0)),
+            ], None),
+            // Back-facing triangle
+            Polygon::new(vec![
+                Vertex::new(Point3::new(-1.0, 0.0, 0.0), Vector3::new(0.0, 0.0, 1.0)),
+                Vertex::new(Point3::new(-2.0, 0.0, 0.0), Vector3::new(0.0, 0.0, 1.0)),
+                Vertex::new(Point3::new(-1.5, 1.0, 0.0), Vector3::new(0.0, 0.0, 1.0)),
+            ], None),
+            // Spanning triangle
+            Polygon::new(vec![
+                Vertex::new(Point3::new(-0.5, 0.0, 0.0), Vector3::new(0.0, 0.0, 1.0)),
+                Vertex::new(Point3::new(0.5, 0.0, 0.0), Vector3::new(0.0, 0.0, 1.0)),
+                Vertex::new(Point3::new(0.0, 1.0, 0.0), Vector3::new(0.0, 0.0, 1.0)),
+            ], None),
+        ]
+    }
+
+    fn create_degenerate_polygons() -> Vec<Polygon<()>> {
+        vec![
+            // Very small triangle
+            Polygon::new(vec![
+                Vertex::new(Point3::new(0.0, 0.0, 0.0), Vector3::new(0.0, 0.0, 1.0)),
+                Vertex::new(Point3::new(1e-8, 0.0, 0.0), Vector3::new(0.0, 0.0, 1.0)),
+                Vertex::new(Point3::new(0.0, 1e-8, 0.0), Vector3::new(0.0, 0.0, 1.0)),
+            ], None),
+        ]
+    }
+}

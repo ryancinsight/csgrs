@@ -36,6 +36,14 @@ impl PartialEq for Plane {
 fn to_c3(p: Point3<Real>) -> Coord3D<Real> { Coord3D { x: p.x, y: p.y, z: p.z } }
 
 impl Plane {
+    /// Create a plane from three points
+    ///
+    /// **Mathematical Foundation**: A plane is uniquely defined by three non-collinear points.
+    /// The plane equation is derived from the cross product of two edge vectors.
+    pub fn from_points(point_a: Point3<Real>, point_b: Point3<Real>, point_c: Point3<Real>) -> Plane {
+        Plane { point_a, point_b, point_c }
+    }
+
     pub fn from_vertices(vertices: Vec<Vertex>) -> Plane {
         let n = vertices.len();
         let reference = Plane { point_a: vertices[0].pos, point_b: vertices[1].pos, point_c: vertices[2].pos };

@@ -151,3 +151,6 @@ bevymesh = [
   "dep:wgpu-types"
 ]
 parry3d = ["dep:parry3d"]
+
+[dev-dependencies]
+criterion = { version = "0.5", features = ["html_reports"] }
