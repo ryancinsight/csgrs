@@ -3,6 +3,7 @@ use crate::mesh::Mesh;
 use crate::mesh::polygon::Polygon;
 use crate::mesh::vertex::Vertex;
 use crate::sketch::Sketch;
+use crate::traits::CSG;
 
 use geo::CoordsIter;
 use nalgebra::{Point3, Vector3};
@@ -29,13 +30,24 @@ impl UnifiedMesh {
         let mut triangles: Vec<[usize; 3]> = Vec::new();
         let mut normals: Vec<Vector3<Real>> = Vec::new();
 
-        // Tolerance for vertex merging (1 micrometer for typical units)
-        let epsilon = 1e-9;
+        // Tolerance for vertex merging (adaptive based on mesh scale)
+        // Calculate mesh scale to set appropriate epsilon
+        let bbox = mesh.bounding_box();
+        let mesh_scale = (bbox.maxs - bbox.mins).norm();
+        let epsilon = (mesh_scale * 1e-10).max(1e-12); // Adaptive tolerance
 
-        // First, triangulate the entire mesh
-        let triangulated = mesh.triangulate();
+        // Check if mesh is already triangulated to avoid double triangulation
+        let needs_triangulation = mesh.polygons.iter().any(|p| p.vertices.len() != 3);
+        let triangulated_mesh = if needs_triangulation {
+            mesh.triangulate()
+        } else {
+            mesh.clone()
+        };
 
-        for polygon in &triangulated.polygons {
+        // Filter out degenerate triangles that cause gaps and visual artifacts
+        let working_mesh = Self::filter_degenerate_triangles(&triangulated_mesh, epsilon);
+
+        for polygon in &working_mesh.polygons {
             if polygon.vertices.len() != 3 {
                 continue; // Skip non-triangular polygons
             }
@@ -46,22 +58,32 @@ impl UnifiedMesh {
             let poly_normal = polygon.plane.normal().normalize();
 
             for (i, vertex) in polygon.vertices.iter().enumerate() {
-                // Create a key for vertex position with high precision
-                let key = format!("{:.12}_{:.12}_{:.12}",
-                                 vertex.pos.x, vertex.pos.y, vertex.pos.z);
+                // Create a quantized key for vertex position to enable proper merging
+                // Quantize to epsilon precision to group nearby vertices
+                let quantize = |val: Real| -> i64 {
+                    (val / epsilon).round() as i64
+                };
+
+                let key = format!("{}_{}_{}",
+                                 quantize(vertex.pos.x),
+                                 quantize(vertex.pos.y),
+                                 quantize(vertex.pos.z));
 
                 let vertex_index = if let Some(&existing_index) = vertex_map.get(&key) {
-                    // Check if vertices are actually close enough
+                    // Verify the existing vertex is actually close enough
                     let existing_vertex = vertices[existing_index];
                     let distance = (existing_vertex - vertex.pos).norm();
 
-                    if distance < epsilon {
+                    if distance < epsilon * 2.0 { // Allow some tolerance for quantization
                         existing_index
                     } else {
-                        // Create new vertex
+                        // Quantization collision - create new vertex
                         let new_index = vertices.len();
                         vertices.push(vertex.pos);
-                        vertex_map.insert(key, new_index);
+                        // Use a more precise key to avoid future collisions
+                        let precise_key = format!("{:.15}_{:.15}_{:.15}_{}",
+                                                 vertex.pos.x, vertex.pos.y, vertex.pos.z, new_index);
+                        vertex_map.insert(precise_key, new_index);
                         new_index
                     }
                 } else {
@@ -84,6 +106,71 @@ impl UnifiedMesh {
             triangles,
             normals,
         }
+    }
+
+    /// Filter out degenerate triangles that cause visual gaps and artifacts
+    fn filter_degenerate_triangles<S: Clone + Debug + Send + Sync>(mesh: &Mesh<S>, epsilon: Real) -> Mesh<S> {
+        let mut filtered_polygons = Vec::new();
+
+        for polygon in &mesh.polygons {
+            if polygon.vertices.len() != 3 {
+                // Keep non-triangular polygons as-is
+                filtered_polygons.push(polygon.clone());
+                continue;
+            }
+
+            let v0 = polygon.vertices[0].pos;
+            let v1 = polygon.vertices[1].pos;
+            let v2 = polygon.vertices[2].pos;
+
+            // Calculate triangle properties
+            let edge1 = v1 - v0;
+            let edge2 = v2 - v0;
+            let edge3 = v2 - v1;
+
+            let edge1_len = edge1.norm();
+            let edge2_len = edge2.norm();
+            let edge3_len = edge3.norm();
+
+            // Skip triangles with very short edges (likely degenerate)
+            let min_edge_length = epsilon * 1000.0; // Minimum edge length
+            if edge1_len < min_edge_length || edge2_len < min_edge_length || edge3_len < min_edge_length {
+                continue; // Skip degenerate triangle
+            }
+
+            // Calculate triangle area using cross product
+            let cross_product = edge1.cross(&edge2);
+            let area = cross_product.norm() * 0.5;
+
+            // Skip triangles with very small area (likely degenerate)
+            let min_area = epsilon * epsilon * 1000000.0; // Minimum area
+            if area < min_area {
+                continue; // Skip degenerate triangle
+            }
+
+            // Calculate minimum angle to detect sliver triangles
+            let cos_angle1 = edge1.dot(&edge2) / (edge1_len * edge2_len);
+            let cos_angle2 = (-edge1).dot(&edge3) / (edge1_len * edge3_len);
+            let cos_angle3 = (-edge2).dot(&(-edge3)) / (edge2_len * edge3_len);
+
+            // Convert to angles (clamp to avoid numerical issues)
+            let angle1 = cos_angle1.clamp(-1.0, 1.0).acos();
+            let angle2 = cos_angle2.clamp(-1.0, 1.0).acos();
+            let angle3 = cos_angle3.clamp(-1.0, 1.0).acos();
+
+            let min_angle = angle1.min(angle2).min(angle3);
+
+            // Skip triangles with very small angles (sliver triangles)
+            let min_angle_threshold = 0.5_f64.to_radians(); // 0.5 degrees
+            if min_angle < min_angle_threshold {
+                continue; // Skip sliver triangle
+            }
+
+            // Triangle passes quality checks - keep it
+            filtered_polygons.push(polygon.clone());
+        }
+
+        Mesh::from_polygons(&filtered_polygons, mesh.metadata.clone())
     }
 }
 
