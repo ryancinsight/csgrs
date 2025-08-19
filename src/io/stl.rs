@@ -1,4 +1,5 @@
 use crate::float_types::Real;
+use crate::float_types::parry3d::bounding_volume::Aabb;
 use crate::mesh::Mesh;
 use crate::mesh::polygon::Polygon;
 use crate::mesh::vertex::Vertex;
@@ -44,8 +45,11 @@ impl UnifiedMesh {
             mesh.clone()
         };
 
-        // Filter out degenerate triangles that cause gaps and visual artifacts
-        let working_mesh = Self::filter_degenerate_triangles(&triangulated_mesh, epsilon);
+        // Use the triangulated mesh directly - preserve all geometry including internal surfaces
+        // Note: CSG operations may create poor quality triangles, but these are often essential
+        // for defining internal surfaces like cylindrical holes. Filtering them would remove
+        // important geometry. Let downstream tools handle quality improvement if needed.
+        let working_mesh = triangulated_mesh;
 
         for polygon in &working_mesh.polygons {
             if polygon.vertices.len() != 3 {
@@ -109,10 +113,51 @@ impl UnifiedMesh {
     }
 
     /// Filter out degenerate triangles that cause visual gaps and artifacts
+    /// while preserving essential geometry like internal surfaces
+    ///
+    /// NOTE: Currently disabled to preserve all geometry including internal surfaces.
+    /// CSG operations create poor quality triangles for internal surfaces (like cylinder walls)
+    /// but these are essential geometry that should not be filtered.
+    #[allow(dead_code)]
     fn filter_degenerate_triangles<S: Clone + Debug + Send + Sync>(mesh: &Mesh<S>, epsilon: Real) -> Mesh<S> {
         let mut filtered_polygons = Vec::new();
 
+        // First pass: analyze all triangles to understand the geometry
+        let mut triangle_areas = Vec::new();
+        let mut triangle_centers = Vec::new();
+
         for polygon in &mesh.polygons {
+            if polygon.vertices.len() != 3 {
+                triangle_areas.push(0.0);
+                triangle_centers.push((0.0, 0.0, 0.0));
+                continue;
+            }
+
+            let v0 = polygon.vertices[0].pos;
+            let v1 = polygon.vertices[1].pos;
+            let v2 = polygon.vertices[2].pos;
+
+            // Calculate triangle center and area
+            let center = (v0.coords + v1.coords + v2.coords) / 3.0;
+            triangle_centers.push((center.x, center.y, center.z));
+
+            let edge1 = v1 - v0;
+            let edge2 = v2 - v0;
+            let cross_product = edge1.cross(&edge2);
+            let area = cross_product.norm() * 0.5;
+            triangle_areas.push(area);
+        }
+
+        // Calculate mesh bounding box and characteristics
+        let bbox = mesh.bounding_box();
+        let mesh_size = (bbox.maxs - bbox.mins).norm();
+
+        // Adaptive thresholds based on mesh scale
+        let min_edge_length = epsilon * mesh_size * 0.001; // Very small relative to mesh
+        let min_area = epsilon * epsilon * mesh_size * mesh_size * 0.000001; // Very small relative to mesh
+
+        // Second pass: filter with geometric awareness
+        for (i, polygon) in mesh.polygons.iter().enumerate() {
             if polygon.vertices.len() != 3 {
                 // Keep non-triangular polygons as-is
                 filtered_polygons.push(polygon.clone());
@@ -132,38 +177,52 @@ impl UnifiedMesh {
             let edge2_len = edge2.norm();
             let edge3_len = edge3.norm();
 
-            // Skip triangles with very short edges (likely degenerate)
-            let min_edge_length = epsilon * 1000.0; // Minimum edge length
-            if edge1_len < min_edge_length || edge2_len < min_edge_length || edge3_len < min_edge_length {
-                continue; // Skip degenerate triangle
-            }
-
-            // Calculate triangle area using cross product
+            // Calculate triangle area and normal
             let cross_product = edge1.cross(&edge2);
             let area = cross_product.norm() * 0.5;
+            let _normal = if area > 1e-12 { cross_product.normalize() } else { continue; };
 
-            // Skip triangles with very small area (likely degenerate)
-            let min_area = epsilon * epsilon * 1000000.0; // Minimum area
+            // Check for truly degenerate triangles (zero area or coincident vertices)
             if area < min_area {
-                continue; // Skip degenerate triangle
+                continue; // Skip truly degenerate triangles
             }
 
-            // Calculate minimum angle to detect sliver triangles
+            if edge1_len < min_edge_length || edge2_len < min_edge_length || edge3_len < min_edge_length {
+                continue; // Skip triangles with extremely short edges
+            }
+
+            // Calculate minimum angle
             let cos_angle1 = edge1.dot(&edge2) / (edge1_len * edge2_len);
             let cos_angle2 = (-edge1).dot(&edge3) / (edge1_len * edge3_len);
             let cos_angle3 = (-edge2).dot(&(-edge3)) / (edge2_len * edge3_len);
 
-            // Convert to angles (clamp to avoid numerical issues)
             let angle1 = cos_angle1.clamp(-1.0, 1.0).acos();
             let angle2 = cos_angle2.clamp(-1.0, 1.0).acos();
             let angle3 = cos_angle3.clamp(-1.0, 1.0).acos();
 
             let min_angle = angle1.min(angle2).min(angle3);
 
-            // Skip triangles with very small angles (sliver triangles)
-            let min_angle_threshold = 0.5_f64.to_radians(); // 0.5 degrees
-            if min_angle < min_angle_threshold {
-                continue; // Skip sliver triangle
+            // Smart filtering based on geometric context
+            let center = triangle_centers[i];
+            let is_potentially_internal = Self::is_potentially_internal_surface(center, &triangle_centers, &bbox);
+
+            // Calculate aspect ratio for additional filtering criteria
+            let max_edge = edge1_len.max(edge2_len).max(edge3_len);
+            let min_edge = edge1_len.min(edge2_len).min(edge3_len);
+            let aspect_ratio = if min_edge > 1e-12 { max_edge / min_edge } else { Real::INFINITY };
+
+            if is_potentially_internal {
+                // For internal surfaces (like cylinder walls), be very conservative
+                // Only filter triangles that are truly degenerate (near-zero area or extreme aspect ratios)
+                if area < min_area * 0.1 || aspect_ratio > 1000.0 {
+                    continue; // Skip only extremely degenerate internal triangles
+                }
+            } else {
+                // For external surfaces, apply more aggressive filtering
+                let angle_threshold = 0.2_f64.to_radians(); // 0.2 degrees
+                if min_angle < angle_threshold || aspect_ratio > 200.0 {
+                    continue; // Skip sliver triangles on external surfaces
+                }
             }
 
             // Triangle passes quality checks - keep it
@@ -171,6 +230,42 @@ impl UnifiedMesh {
         }
 
         Mesh::from_polygons(&filtered_polygons, mesh.metadata.clone())
+    }
+
+    /// Heuristic to detect if a triangle might be part of an internal surface
+    #[allow(dead_code)]
+    fn is_potentially_internal_surface(
+        center: (Real, Real, Real),
+        all_centers: &[(Real, Real, Real)],
+        bbox: &Aabb
+    ) -> bool {
+        // Check if triangle is well inside the bounding box (not on external faces)
+        let margin = 0.1; // 10% margin from edges
+        let x_margin = (bbox.maxs.x - bbox.mins.x) * margin;
+        let y_margin = (bbox.maxs.y - bbox.mins.y) * margin;
+        let z_margin = (bbox.maxs.z - bbox.mins.z) * margin;
+
+        let is_internal = center.0 > bbox.mins.x + x_margin && center.0 < bbox.maxs.x - x_margin &&
+                         center.1 > bbox.mins.y + y_margin && center.1 < bbox.maxs.y - y_margin &&
+                         center.2 > bbox.mins.z + z_margin && center.2 < bbox.maxs.z - z_margin;
+
+        if !is_internal {
+            return false;
+        }
+
+        // Check if there are many triangles with similar positions (indicating a surface)
+        let proximity_threshold = ((bbox.maxs.x - bbox.mins.x) + (bbox.maxs.y - bbox.mins.y) + (bbox.maxs.z - bbox.mins.z)) / 30.0;
+        let nearby_count = all_centers.iter()
+            .filter(|other_center| {
+                let dx = center.0 - other_center.0;
+                let dy = center.1 - other_center.1;
+                let dz = center.2 - other_center.2;
+                (dx*dx + dy*dy + dz*dz).sqrt() < proximity_threshold
+            })
+            .count();
+
+        // If there are many nearby triangles, this is likely part of a surface
+        nearby_count > 10
     }
 }
 
