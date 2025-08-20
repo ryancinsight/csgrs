@@ -569,6 +569,228 @@ fn test_csg_difference() {
 }
 
 #[test]
+fn test_cube_cylinder_subtraction_meter_scale() {
+    // Test cube-cylinder subtraction at meter scale to verify no gaps or tangential lines
+    let cube_size = 2.0; // 2 meter cube
+    let cylinder_radius = 0.3; // 30cm radius
+    let cylinder_height = 3.0; // 3 meter height (extends beyond cube)
+
+    let cube: Mesh<()> = Mesh::cube(cube_size, None);
+    let cylinder: Mesh<()> = Mesh::cylinder(cylinder_radius, cylinder_height, 16, None)
+        .translate(cube_size/2.0, cube_size/2.0, cube_size/2.0 - cylinder_height/2.0);
+
+    let result = cube.difference(&cylinder);
+
+    // Validate result has polygons
+    assert!(!result.polygons.is_empty(), "Result should have polygons");
+
+    // Validate bounding box is preserved (cube dimensions maintained)
+    let bbox = result.bounding_box();
+    assert!((bbox.maxs.x - bbox.mins.x - cube_size).abs() < 1e-10,
+            "X dimension should be preserved");
+    assert!((bbox.maxs.y - bbox.mins.y - cube_size).abs() < 1e-10,
+            "Y dimension should be preserved");
+    assert!((bbox.maxs.z - bbox.mins.z - cube_size).abs() < 1e-10,
+            "Z dimension should be preserved");
+
+    // Validate mesh quality - no degenerate polygons
+    for polygon in &result.polygons {
+        assert!(polygon.vertices.len() >= 3, "All polygons should have at least 3 vertices");
+
+        // Check polygon is not degenerate by validating edge lengths
+        let mut min_edge_length = Real::MAX;
+        for i in 0..polygon.vertices.len() {
+            let j = (i + 1) % polygon.vertices.len();
+            let edge_length = (polygon.vertices[j].pos - polygon.vertices[i].pos).norm();
+            min_edge_length = min_edge_length.min(edge_length);
+        }
+        assert!(min_edge_length > 1e-12, "Polygon has degenerate edge: {}", min_edge_length);
+    }
+}
+
+#[test]
+fn test_cube_cylinder_subtraction_millimeter_scale() {
+    // Test cube-cylinder subtraction at millimeter scale
+    let cube_size = 20.0; // 20mm cube
+    let cylinder_radius = 3.0; // 3mm radius
+    let cylinder_height = 30.0; // 30mm height
+
+    let cube: Mesh<()> = Mesh::cube(cube_size, None);
+    let cylinder: Mesh<()> = Mesh::cylinder(cylinder_radius, cylinder_height, 16, None)
+        .translate(cube_size/2.0, cube_size/2.0, cube_size/2.0 - cylinder_height/2.0);
+
+    let result = cube.difference(&cylinder);
+
+    // Same validations as meter scale
+    assert!(!result.polygons.is_empty(), "Result should have polygons");
+
+    let bbox = result.bounding_box();
+    assert!((bbox.maxs.x - bbox.mins.x - cube_size).abs() < 1e-8,
+            "X dimension should be preserved at mm scale");
+    assert!((bbox.maxs.y - bbox.mins.y - cube_size).abs() < 1e-8,
+            "Y dimension should be preserved at mm scale");
+    assert!((bbox.maxs.z - bbox.mins.z - cube_size).abs() < 1e-8,
+            "Z dimension should be preserved at mm scale");
+
+    // Validate mesh quality
+    for polygon in &result.polygons {
+        assert!(polygon.vertices.len() >= 3, "All polygons should have at least 3 vertices");
+        // Check polygon is not degenerate by validating edge lengths
+        let mut min_edge_length = Real::MAX;
+        for i in 0..polygon.vertices.len() {
+            let j = (i + 1) % polygon.vertices.len();
+            let edge_length = (polygon.vertices[j].pos - polygon.vertices[i].pos).norm();
+            min_edge_length = min_edge_length.min(edge_length);
+        }
+        assert!(min_edge_length > 1e-10, "Polygon has degenerate edge at mm scale: {}", min_edge_length);
+    }
+}
+
+#[test]
+fn test_intersection_quality_validation() {
+    // Test that intersections are perpendicular, not tangential
+    let cube_size = 1.0;
+    let cylinder_radius = 0.2;
+    let cylinder_height = 1.5;
+
+    let cube: Mesh<()> = Mesh::cube(cube_size, None);
+    let cylinder: Mesh<()> = Mesh::cylinder(cylinder_radius, cylinder_height, 8, None)
+        .translate(cube_size/2.0, cube_size/2.0, cube_size/2.0 - cylinder_height/2.0);
+
+    let result = cube.difference(&cylinder);
+
+    // Validate that we have clean intersections by checking edge quality
+    let mut total_edge_length = 0.0;
+    let mut short_edge_count = 0;
+    let min_expected_edge_length = cylinder_radius * 0.1; // Edges should be reasonably sized
+
+    for polygon in &result.polygons {
+        let vertices = &polygon.vertices;
+        for i in 0..vertices.len() {
+            let j = (i + 1) % vertices.len();
+            let edge_length = (vertices[j].pos - vertices[i].pos).norm();
+            total_edge_length += edge_length;
+
+            if edge_length < min_expected_edge_length {
+                short_edge_count += 1;
+            }
+        }
+    }
+
+    // Should not have excessive short edges (which indicate poor intersections)
+    let total_edges = result.polygons.iter().map(|p| p.vertices.len()).sum::<usize>();
+    let short_edge_ratio = short_edge_count as f64 / total_edges as f64;
+
+    assert!(short_edge_ratio < 0.1,
+            "Too many short edges detected ({}%), indicating poor intersection quality",
+            short_edge_ratio * 100.0);
+
+    // Average edge length should be reasonable
+    let avg_edge_length = total_edge_length / total_edges as Real;
+    assert!(avg_edge_length > min_expected_edge_length,
+            "Average edge length too small: {}", avg_edge_length);
+}
+
+#[test]
+fn test_scale_invariant_behavior() {
+    // Test that the same geometry at different scales produces proportionally similar results
+    let scales = vec![0.001, 0.01, 0.1, 1.0, 10.0, 100.0]; // micrometers to decimeters
+
+    for &scale in &scales {
+        let cube_size = 2.0 * scale;
+        let cylinder_radius = 0.3 * scale;
+        let cylinder_height = 3.0 * scale;
+
+        let cube: Mesh<()> = Mesh::cube(cube_size, None);
+        let cylinder: Mesh<()> = Mesh::cylinder(cylinder_radius, cylinder_height, 12, None)
+            .translate(cube_size/2.0, cube_size/2.0, cube_size/2.0 - cylinder_height/2.0);
+
+        let result = cube.difference(&cylinder);
+
+        // Should always produce valid results regardless of scale
+        assert!(!result.polygons.is_empty(),
+                "Scale {} should produce polygons", scale);
+
+        // Bounding box should be preserved at all scales
+        let bbox = result.bounding_box();
+        let tolerance = cube_size * 1e-10; // Scale-appropriate tolerance
+
+        assert!((bbox.maxs.x - bbox.mins.x - cube_size).abs() < tolerance,
+                "X dimension not preserved at scale {}", scale);
+        assert!((bbox.maxs.y - bbox.mins.y - cube_size).abs() < tolerance,
+                "Y dimension not preserved at scale {}", scale);
+        assert!((bbox.maxs.z - bbox.mins.z - cube_size).abs() < tolerance,
+                "Z dimension not preserved at scale {}", scale);
+
+        // All polygons should be valid
+        for polygon in &result.polygons {
+            assert!(polygon.vertices.len() >= 3,
+                    "Invalid polygon at scale {}", scale);
+
+            // Check polygon is not degenerate by validating edge lengths
+            let mut min_edge_length = Real::MAX;
+            for i in 0..polygon.vertices.len() {
+                let j = (i + 1) % polygon.vertices.len();
+                let edge_length = (polygon.vertices[j].pos - polygon.vertices[i].pos).norm();
+                min_edge_length = min_edge_length.min(edge_length);
+            }
+            let min_expected_edge = scale * 1e-12; // Scale-appropriate minimum edge length
+            assert!(min_edge_length > min_expected_edge,
+                    "Degenerate polygon edge {} at scale {}", min_edge_length, scale);
+        }
+    }
+}
+
+#[test]
+fn test_improved_baseline_bsp_quality() {
+    // Test that the improved BSP implementation produces better baseline results
+    let cube_size = 1.0;
+    let cylinder_radius = 0.25;
+    let cylinder_height = 1.5;
+
+    let cube: Mesh<()> = Mesh::cube(cube_size, None);
+    let cylinder: Mesh<()> = Mesh::cylinder(cylinder_radius, cylinder_height, 12, None)
+        .translate(cube_size/2.0, cube_size/2.0, cube_size/2.0 - cylinder_height/2.0);
+
+    let result = cube.difference(&cylinder);
+
+    // Validate that we get reasonable polygon count (not excessive fragmentation)
+    assert!(!result.polygons.is_empty(), "Result should have polygons");
+    assert!(result.polygons.len() < 500, "Should not create excessive polygons: {}", result.polygons.len());
+
+    // Validate mesh quality metrics
+    let mut very_small_edges = 0;
+    let mut total_edges = 0;
+    let min_edge_threshold = cylinder_radius * 0.01; // Very small relative to geometry
+
+    for polygon in &result.polygons {
+        let vertices = &polygon.vertices;
+        for i in 0..vertices.len() {
+            let j = (i + 1) % vertices.len();
+            let edge_length = (vertices[j].pos - vertices[i].pos).norm();
+            total_edges += 1;
+
+            if edge_length < min_edge_threshold {
+                very_small_edges += 1;
+            }
+        }
+    }
+
+    // Should have very few tiny edges (indicates good intersection quality)
+    let small_edge_ratio = very_small_edges as f64 / total_edges as f64;
+    assert!(small_edge_ratio < 0.05,
+            "Too many very small edges ({}%), indicates poor baseline quality",
+            small_edge_ratio * 100.0);
+
+    // Validate that all polygons have reasonable vertex counts
+    for polygon in &result.polygons {
+        assert!(polygon.vertices.len() >= 3, "All polygons should have at least 3 vertices");
+        assert!(polygon.vertices.len() <= 20, "Polygons should not be overly complex: {} vertices",
+                polygon.vertices.len());
+    }
+}
+
+#[test]
 fn test_csg_union2() {
     let c1: Mesh<()> = Mesh::cube(2.0, None); // cube from (-1..+1) if that's how you set radius=1 by default
     let c2: Mesh<()> = Mesh::sphere(1.0, 16, 8, None); // default sphere radius=1

@@ -292,10 +292,20 @@ impl Plane {
             EPSILON
         };
 
+        // Enhanced numerical conditioning: scale tolerance by distance from plane
+        // Points very close to the plane need tighter tolerance to avoid misclassification
+        let distance_to_plane = sign.abs();
+        let scaled_eps = if distance_to_plane < char_length * 0.01 {
+            // For points very close to the plane, use tighter tolerance
+            adaptive_eps * 0.1
+        } else {
+            adaptive_eps
+        };
+
         #[allow(clippy::useless_conversion)]
-        if sign > adaptive_eps.into() {
+        if sign > scaled_eps.into() {
             BACK
-        } else if sign < (-adaptive_eps).into() {
+        } else if sign < (-scaled_eps).into() {
             FRONT
         } else {
             COPLANAR
@@ -325,6 +335,134 @@ impl Plane {
 
     pub const fn flip(&mut self) {
         std::mem::swap(&mut self.point_a, &mut self.point_b);
+    }
+
+    /// Compute robust intersection between an edge and this plane.
+    /// Returns None if the edge doesn't properly intersect the plane or if the intersection
+    /// is numerically unstable.
+    ///
+    /// Uses proper line-plane intersection mathematics with robust validation:
+    /// - Ensures intersection parameter t is strictly within [0,1] (no extrapolation)
+    /// - Validates that computed intersection actually lies on the plane
+    /// - Uses adaptive tolerance based on geometry scale
+    /// - Handles near-parallel cases robustly
+    pub fn compute_robust_edge_intersection(
+        &self,
+        vertex_i: &Vertex,
+        vertex_j: &Vertex,
+        plane_normal: &Vector3<Real>,
+    ) -> Option<Vertex> {
+        let edge_vec = vertex_j.pos - vertex_i.pos;
+        let edge_length = edge_vec.norm();
+
+        // Skip degenerate edges
+        if edge_length < EPSILON {
+            return None;
+        }
+
+        // Calculate adaptive epsilon based on edge length for scale-invariant behavior
+        let adaptive_eps = adaptive_epsilon(edge_length);
+
+        // Compute denominator for line-plane intersection
+        let denom = plane_normal.dot(&edge_vec);
+
+        // Check if edge is nearly parallel to plane (enhanced numerical conditioning)
+        // Use relative tolerance: |denom| / |edge_vec| > threshold
+        let relative_denom = denom.abs() / edge_length;
+        if relative_denom < adaptive_eps {
+            return None; // Edge is too parallel to plane for stable intersection
+        }
+
+        // Compute intersection parameter using correct line-plane intersection formula
+        // Line: P(t) = vertex_i + t * (vertex_j - vertex_i)
+        // Plane: normal · P = offset
+        // Solving: normal · (vertex_i + t * edge_vec) = offset
+        let numerator = self.offset() - plane_normal.dot(&vertex_i.pos.coords);
+        let t = numerator / denom;
+
+        // Strict parameter validation - no extrapolation allowed
+        // Use tight tolerance to ensure intersection is truly within the edge
+        if t < adaptive_eps || t > 1.0 - adaptive_eps {
+            return None; // Intersection is outside edge bounds
+        }
+
+        // Compute intersection point
+        let intersection_vertex = vertex_i.interpolate(vertex_j, t);
+
+        // Validate that computed intersection actually lies on the plane
+        let distance_to_plane = (plane_normal.dot(&intersection_vertex.pos.coords) - self.offset()).abs();
+        if distance_to_plane > adaptive_eps {
+            return None; // Intersection doesn't lie on plane within tolerance
+        }
+
+        Some(intersection_vertex)
+    }
+
+    /// Calculate characteristic length for a set of polygons.
+    /// This provides a consistent scale reference for adaptive tolerances.
+    pub fn calculate_polygon_characteristic_length<S: Clone>(polygons: &[Polygon<S>]) -> Real {
+        if polygons.is_empty() {
+            return 1.0; // Default scale
+        }
+
+        let mut total_edge_length = 0.0;
+        let mut edge_count = 0;
+
+        for polygon in polygons {
+            let vertices = &polygon.vertices;
+            if vertices.len() < 2 {
+                continue;
+            }
+
+            for i in 0..vertices.len() {
+                let j = (i + 1) % vertices.len();
+                let edge_length = (vertices[j].pos - vertices[i].pos).norm();
+                if edge_length > EPSILON {
+                    total_edge_length += edge_length;
+                    edge_count += 1;
+                }
+            }
+        }
+
+        if edge_count > 0 {
+            total_edge_length / edge_count as Real
+        } else {
+            1.0 // Default scale
+        }
+    }
+
+    /// Remove duplicate vertices from a vertex list to prevent degenerate polygons.
+    /// This is crucial after intersection calculations which may create nearly identical vertices.
+    fn remove_duplicate_vertices(&self, vertices: Vec<Vertex>) -> Vec<Vertex> {
+        if vertices.len() < 2 {
+            return vertices;
+        }
+
+        let mut cleaned = Vec::with_capacity(vertices.len());
+        let mut last_vertex = vertices[0];
+        cleaned.push(last_vertex);
+
+        // Calculate adaptive epsilon based on the geometry scale
+        let char_length = (self.point_b - self.point_a).norm().max((self.point_c - self.point_a).norm());
+        let adaptive_eps = adaptive_epsilon(char_length);
+
+        for vertex in vertices.into_iter().skip(1) {
+            let distance = (vertex.pos - last_vertex.pos).norm();
+            if distance > adaptive_eps {
+                cleaned.push(vertex);
+                last_vertex = vertex;
+            }
+        }
+
+        // Check if the first and last vertices are too close (closed loop)
+        if cleaned.len() > 2 {
+            let first_last_distance = (cleaned[0].pos - cleaned[cleaned.len() - 1].pos).norm();
+            if first_last_distance <= adaptive_eps {
+                cleaned.pop(); // Remove the last vertex if it's too close to the first
+            }
+        }
+
+        cleaned
     }
 
     /// Classify a polygon with respect to the plane.
@@ -405,43 +543,29 @@ impl Plane {
                     // If the edge between these two vertices crosses the plane,
                     // compute intersection and add that intersection to both sets
                     if (type_i | type_j) == SPANNING {
-                        // Enhanced intersection calculation with adaptive tolerance
-                        let edge_vec = vertex_j.pos - vertex_i.pos;
-                        let denom = normal.dot(&edge_vec);
-
-                        // Calculate adaptive epsilon based on edge length
-                        let edge_length = edge_vec.norm();
-                        let adaptive_eps = if edge_length > 0.0 {
-                            adaptive_epsilon(edge_length)
-                        } else {
-                            EPSILON
-                        };
-
-                        // Enhanced denominator check with adaptive tolerance
-                        if denom.abs() > adaptive_eps {
-                            // Compute intersection parameter with better numerical conditioning
-                            let numerator = self.offset() - normal.dot(&vertex_i.pos.coords);
-                            let t = numerator / denom;
-
-                            // Validate intersection parameter is within edge bounds with tolerance
-                            if t >= -adaptive_eps && t <= 1.0 + adaptive_eps {
-                                // Clamp t to valid range to prevent extrapolation errors
-                                let t_clamped = t.clamp(0.0, 1.0);
-                                let vertex_new = vertex_i.interpolate(vertex_j, t_clamped);
-                                split_front.push(vertex_new);
-                                split_back.push(vertex_new);
-                            }
+                        if let Some(intersection_vertex) = self.compute_robust_edge_intersection(
+                            vertex_i, vertex_j, &normal
+                        ) {
+                            split_front.push(intersection_vertex);
+                            split_back.push(intersection_vertex);
                         }
                     }
                 }
 
-                // Build new polygons from the front/back vertex lists
-                // if they have at least 3 vertices
+                // Build new polygons from the front/back vertex lists with enhanced validation
                 if split_front.len() >= 3 {
-                    front.push(Polygon::new(split_front, polygon.metadata.clone()));
+                    // Remove duplicate vertices that might have been created during intersection
+                    let cleaned_front = self.remove_duplicate_vertices(split_front);
+                    if cleaned_front.len() >= 3 {
+                        front.push(Polygon::new(cleaned_front, polygon.metadata.clone()));
+                    }
                 }
                 if split_back.len() >= 3 {
-                    back.push(Polygon::new(split_back, polygon.metadata.clone()));
+                    // Remove duplicate vertices that might have been created during intersection
+                    let cleaned_back = self.remove_duplicate_vertices(split_back);
+                    if cleaned_back.len() >= 3 {
+                        back.push(Polygon::new(cleaned_back, polygon.metadata.clone()));
+                    }
                 }
             },
         }

@@ -16,7 +16,7 @@ use crate::mesh::Polygon;
 use crate::mesh::Vertex;
 
 #[cfg(feature = "parallel")]
-use crate::float_types::EPSILON;
+
 
 impl<S: Clone + Send + Sync + Debug> Node<S> {
     /// Invert all polygons in the BSP tree using iterative approach to avoid stack overflow
@@ -209,15 +209,10 @@ impl<S: Clone + Send + Sync + Debug> Node<S> {
                             let vj = &poly.vertices[j];
 
                             if (ti | tj) == SPANNING {
-                                // The param intersection at which plane intersects the edge [vi -> vj].
-                                // Avoid dividing by zero:
-                                let denom = slicing_plane.normal().dot(&(vj.pos - vi.pos));
-                                if denom.abs() > EPSILON {
-                                    let intersection = (slicing_plane.offset()
-                                        - slicing_plane.normal().dot(&vi.pos.coords))
-                                        / denom;
-                                    // Interpolate:
-                                    let intersect_vert = vi.interpolate(vj, intersection);
+                                // Use the robust intersection method from plane
+                                if let Some(intersect_vert) = slicing_plane.compute_robust_edge_intersection(
+                                    vi, vj, &slicing_plane.normal()
+                                ) {
                                     crossing_points.push(intersect_vert);
                                 }
                             }

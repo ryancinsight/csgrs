@@ -105,17 +105,51 @@ impl<S: Clone + Send + Sync + Debug> Node<S> {
     }
 
     pub fn pick_best_splitting_plane(&self, polygons: &[Polygon<S>]) -> Plane {
-        const K_SPANS: Real = 8.0; // Weight for spanning polygons
-        const K_BALANCE: Real = 1.0; // Weight for front/back balance
-        const K_STABILITY: Real = 2.0; // Weight for numerical stability
+        // Dynamic weights based on geometry characteristics
+        let characteristic_length = Plane::calculate_polygon_characteristic_length(polygons);
+        let polygon_count = polygons.len() as Real;
+
+        // Adaptive weights: prioritize quality for complex geometry, balance for simple geometry
+        let k_spans = if polygon_count > 50.0 { 6.0 } else { 8.0 };
+        let k_balance = if polygon_count > 100.0 { 0.5 } else { 1.0 };
+        let k_stability = 3.0; // Always important
+        let k_quality = if polygon_count > 30.0 { 8.0 } else { 5.0 }; // Higher priority for complex meshes
 
         let mut best_plane = polygons[0].plane.clone();
         let mut best_score = Real::MAX;
-        let characteristic_length = Self::calculate_characteristic_length(polygons);
 
-        // Take a sample of polygons as candidate planes
-        let sample_size = polygons.len().min(20);
-        for p in polygons.iter().take(sample_size) {
+        // Improved sampling strategy: stratified sampling for better coverage
+        let sample_size = if polygons.len() <= 20 {
+            polygons.len()
+        } else {
+            // Sample every nth polygon plus some random ones for better distribution
+            let _stride = polygons.len() / 15; // Get ~15 evenly distributed
+            let extra_samples = 5.min(polygons.len() - 15); // Add up to 5 more
+            15 + extra_samples
+        };
+
+        let mut candidates = Vec::with_capacity(sample_size);
+
+        if polygons.len() <= 20 {
+            // Use all polygons for small sets
+            candidates.extend(polygons.iter());
+        } else {
+            // Stratified sampling: take every nth polygon
+            let stride = polygons.len() / 15;
+            for i in (0..polygons.len()).step_by(stride.max(1)).take(15) {
+                candidates.push(&polygons[i]);
+            }
+            // Add some from the end to ensure good coverage
+            let remaining = sample_size - candidates.len();
+            let start_idx = polygons.len().saturating_sub(remaining);
+            for poly in polygons.iter().skip(start_idx) {
+                if candidates.len() < sample_size {
+                    candidates.push(poly);
+                }
+            }
+        }
+
+        for p in candidates {
             let plane = &p.plane;
             let plane_normal = plane.normal();
 
@@ -138,11 +172,19 @@ impl<S: Clone + Send + Sync + Debug> Node<S> {
                 }
             }
 
-            let balance_score = K_BALANCE * ((num_front - num_back) as Real).abs();
-            let spanning_score = K_SPANS * num_spanning as Real;
-            let stability_score = K_STABILITY * self.calculate_stability_penalty(&plane_normal, characteristic_length);
+            // Enhanced scoring with geometric awareness
+            let balance_score = k_balance * ((num_front - num_back) as Real).abs();
+            let spanning_score = k_spans * num_spanning as Real;
+            let stability_score = k_stability * self.calculate_stability_penalty(&plane_normal, characteristic_length);
 
-            let total_score = spanning_score + balance_score + stability_score;
+            // Calculate intersection quality score (lower is better, so we subtract it)
+            let quality_score = self.calculate_intersection_quality_score(plane, polygons);
+            let quality_penalty = k_quality * (1.0 - quality_score); // Convert to penalty
+
+            // Additional geometric considerations for curved surfaces
+            let curvature_bonus = self.calculate_curvature_alignment_bonus(plane, polygons);
+
+            let total_score = spanning_score + balance_score + stability_score + quality_penalty - curvature_bonus;
 
             if total_score < best_score {
                 best_score = total_score;
@@ -174,6 +216,104 @@ impl<S: Clone + Send + Sync + Debug> Node<S> {
         }
 
         penalty
+    }
+
+    /// Calculate intersection quality score for a plane with the given polygons.
+    /// Higher scores indicate better intersection quality (more perpendicular cuts).
+    /// This helps avoid tangential intersections that create gaps and poor geometry.
+    fn calculate_intersection_quality_score(&self, plane: &Plane, polygons: &[Polygon<S>]) -> Real {
+        let plane_normal = plane.normal();
+        let mut quality_score = 0.0;
+        let mut intersection_count = 0;
+
+        for polygon in polygons {
+            // Calculate how perpendicular the plane is to the polygon's edges
+            let vertices = &polygon.vertices;
+            if vertices.len() < 2 {
+                continue;
+            }
+
+            for i in 0..vertices.len() {
+                let j = (i + 1) % vertices.len();
+                let edge_vec = vertices[j].pos - vertices[i].pos;
+                let edge_length = edge_vec.norm();
+
+                if edge_length < GLOBAL_EPSILON {
+                    continue; // Skip degenerate edges
+                }
+
+                let edge_dir = edge_vec / edge_length;
+
+                // Calculate angle between plane normal and edge direction
+                // cos(θ) = |normal · edge_dir|
+                let cos_angle = plane_normal.dot(&edge_dir).abs();
+
+                // For good intersections, we want the plane normal to be perpendicular
+                // to the edge (cos_angle close to 0) or parallel (cos_angle close to 1)
+                // Penalize angles around 45 degrees (cos_angle ≈ 0.707) which create
+                // tangential intersections
+                let perpendicularity_score = if cos_angle < 0.3 {
+                    // Nearly perpendicular - excellent for clean cuts
+                    1.0
+                } else if cos_angle > 0.9 {
+                    // Nearly parallel - good for avoiding intersections
+                    0.8
+                } else {
+                    // Oblique angle - penalize heavily as this creates tangential cuts
+                    let oblique_penalty = (cos_angle - 0.3) / 0.6; // 0 to 1 range
+                    0.2 * (1.0 - oblique_penalty) // Heavily penalize oblique angles
+                };
+
+                quality_score += perpendicularity_score * edge_length;
+                intersection_count += 1;
+            }
+        }
+
+        if intersection_count > 0 {
+            quality_score / intersection_count as Real
+        } else {
+            0.0
+        }
+    }
+
+    /// Calculate bonus for planes that align well with curved surfaces.
+    /// This helps BSP trees handle cylinder-cube intersections better by preferring
+    /// planes that cut cleanly through curved geometry rather than tangentially.
+    fn calculate_curvature_alignment_bonus(&self, plane: &Plane, polygons: &[Polygon<S>]) -> Real {
+        let plane_normal = plane.normal();
+        let mut alignment_bonus = 0.0;
+        let mut surface_count = 0;
+
+        for polygon in polygons {
+            let poly_normal = polygon.plane.normal();
+
+            // Calculate how well the splitting plane aligns with the polygon's surface
+            let dot_product = plane_normal.dot(&poly_normal).abs();
+
+            // Bonus for planes that are either very parallel (dot ≈ 1) or very perpendicular (dot ≈ 0)
+            // to existing surfaces - these create clean cuts
+            let alignment_score = if dot_product > 0.9 {
+                // Nearly parallel - good for separating layers
+                1.0
+            } else if dot_product < 0.1 {
+                // Nearly perpendicular - excellent for cutting through surfaces
+                2.0
+            } else {
+                // Oblique angles - less desirable
+                0.1
+            };
+
+            // Weight by polygon size (larger polygons have more influence)
+            let polygon_size = polygon.vertices.len() as Real;
+            alignment_bonus += alignment_score * polygon_size;
+            surface_count += polygon_size as i32;
+        }
+
+        if surface_count > 0 {
+            alignment_bonus / surface_count as Real
+        } else {
+            0.0
+        }
     }
 
     /// Recursively remove all polygons in `polygons` that are inside this BSP tree
@@ -269,15 +409,20 @@ impl<S: Clone + Send + Sync + Debug> Node<S> {
         }
         let plane = self.plane.as_ref().unwrap();
 
-        // Pre-allocate with estimated capacity for better performance
+        // Enhanced pre-allocation based on polygon analysis
         let mut front = Vec::with_capacity(polygons.len() / 2);
         let mut back = Vec::with_capacity(polygons.len() / 2);
+        let mut total_splits = 0;
 
-        // Optimized polygon classification using iterator pattern with enhanced splitting
-        // **Mathematical Theorem**: Each polygon is classified relative to the splitting plane
+        // Optimized polygon classification with split tracking for quality metrics
         for polygon in polygons {
             let (coplanar_front, coplanar_back, mut front_parts, mut back_parts) =
                 plane.split_polygon(polygon);
+
+            // Track splitting statistics for adaptive tree balancing
+            if !front_parts.is_empty() && !back_parts.is_empty() {
+                total_splits += 1;
+            }
 
             // Extend collections efficiently with iterator chains
             self.polygons.extend(coplanar_front);
@@ -286,17 +431,28 @@ impl<S: Clone + Send + Sync + Debug> Node<S> {
             back.append(&mut back_parts);
         }
 
-        // Build child nodes using lazy initialization pattern for memory efficiency
-        if !front.is_empty() {
+        // Adaptive depth control: if we're creating too many splits,
+        // prefer leaf nodes to prevent over-fragmentation
+        let split_ratio = total_splits as Real / polygons.len() as Real;
+        let should_continue_splitting = split_ratio < 0.8 && polygons.len() > 4;
+
+        // Build child nodes with adaptive depth control for better mesh quality
+        if !front.is_empty() && should_continue_splitting {
             self.front
                 .get_or_insert_with(|| Box::new(Node::new()))
                 .build(&front);
+        } else if !front.is_empty() {
+            // Convert remaining polygons to leaf node
+            self.polygons.extend(front);
         }
 
-        if !back.is_empty() {
+        if !back.is_empty() && should_continue_splitting {
             self.back
                 .get_or_insert_with(|| Box::new(Node::new()))
                 .build(&back);
+        } else if !back.is_empty() {
+            // Convert remaining polygons to leaf node
+            self.polygons.extend(back);
         }
     }
 
@@ -348,15 +504,10 @@ impl<S: Clone + Send + Sync + Debug> Node<S> {
                             let vj = &poly.vertices[j];
 
                             if (ti | tj) == SPANNING {
-                                let denom = slicing_plane.normal().dot(&(vj.pos - vi.pos));
-                                if denom.abs() > EPSILON {
-                                    let intersection = (slicing_plane.offset()
-                                        - slicing_plane.normal().dot(&vi.pos.coords))
-                                        / denom;
-                                    Some(vi.interpolate(vj, intersection))
-                                } else {
-                                    None
-                                }
+                                // Use the robust intersection method from plane
+                                slicing_plane.compute_robust_edge_intersection(
+                                    vi, vj, &slicing_plane.normal()
+                                )
                             } else {
                                 None
                             }
