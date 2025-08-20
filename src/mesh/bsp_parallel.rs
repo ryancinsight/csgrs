@@ -54,10 +54,10 @@ impl<S: Clone + Send + Sync + Debug> Node<S> {
         }
         let plane = self.plane.as_ref().unwrap();
 
-        // Split each polygon in parallel; gather results
+        // Split each polygon in parallel with enhanced numerical stability
         let (coplanar_front, coplanar_back, mut front, mut back) = polygons
             .par_iter()
-            .map(|poly| plane.split_polygon(poly)) // <-- just pass poly
+            .map(|poly| plane.split_polygon(poly))
             .reduce(
                 || (Vec::new(), Vec::new(), Vec::new(), Vec::new()),
                 |mut acc, x| {
@@ -133,7 +133,7 @@ impl<S: Clone + Send + Sync + Debug> Node<S> {
         }
         let plane = self.plane.as_ref().unwrap();
 
-        // Split polygons in parallel
+        // Split polygons in parallel with enhanced numerical stability
         let (mut coplanar_front, mut coplanar_back, front, back) =
             polygons.par_iter().map(|p| plane.split_polygon(p)).reduce(
                 || (Vec::new(), Vec::new(), Vec::new(), Vec::new()),

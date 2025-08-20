@@ -6,9 +6,10 @@ use crate::float_types::EPSILON;
 #[cfg(not(feature = "parallel"))]
 use crate::mesh::vertex::Vertex;
 
-use crate::float_types::Real;
+use crate::float_types::{Real, EPSILON as GLOBAL_EPSILON};
 use crate::mesh::plane::{BACK, COPLANAR, FRONT, Plane, SPANNING};
 use crate::mesh::polygon::Polygon;
+use nalgebra::Vector3;
 use std::fmt::Debug;
 
 /// A [BSP](https://en.wikipedia.org/wiki/Binary_space_partitioning) tree node, containing polygons plus optional front/back subtrees
@@ -32,6 +33,35 @@ pub struct Node<S: Clone> {
 impl<S: Clone + Send + Sync + Debug> Default for Node<S> {
     fn default() -> Self {
         Self::new()
+    }
+}
+
+impl<S: Clone + Send + Sync + Debug> Node<S> {
+    /// Calculate characteristic length for a set of polygons.
+    /// Uses the bounding box diagonal as a measure of geometric scale.
+    pub fn calculate_characteristic_length(polygons: &[Polygon<S>]) -> Real {
+        if polygons.is_empty() {
+            return 1.0; // Default fallback
+        }
+
+        // Find bounding box of all polygon vertices
+        let mut min_point = polygons[0].vertices[0].pos;
+        let mut max_point = min_point;
+
+        for polygon in polygons {
+            for vertex in &polygon.vertices {
+                let pos = vertex.pos;
+                min_point.x = min_point.x.min(pos.x);
+                min_point.y = min_point.y.min(pos.y);
+                min_point.z = min_point.z.min(pos.z);
+                max_point.x = max_point.x.max(pos.x);
+                max_point.y = max_point.y.max(pos.y);
+                max_point.z = max_point.z.max(pos.z);
+            }
+        }
+
+        // Return diagonal length as characteristic scale
+        (max_point - min_point).norm()
     }
 }
 
@@ -77,14 +107,23 @@ impl<S: Clone + Send + Sync + Debug> Node<S> {
     pub fn pick_best_splitting_plane(&self, polygons: &[Polygon<S>]) -> Plane {
         const K_SPANS: Real = 8.0; // Weight for spanning polygons
         const K_BALANCE: Real = 1.0; // Weight for front/back balance
+        const K_STABILITY: Real = 2.0; // Weight for numerical stability
 
         let mut best_plane = polygons[0].plane.clone();
         let mut best_score = Real::MAX;
+        let characteristic_length = Self::calculate_characteristic_length(polygons);
 
         // Take a sample of polygons as candidate planes
         let sample_size = polygons.len().min(20);
         for p in polygons.iter().take(sample_size) {
             let plane = &p.plane;
+            let plane_normal = plane.normal();
+
+            // Skip degenerate planes
+            if plane_normal.norm() < GLOBAL_EPSILON {
+                continue;
+            }
+
             let mut num_front = 0;
             let mut num_back = 0;
             let mut num_spanning = 0;
@@ -99,15 +138,42 @@ impl<S: Clone + Send + Sync + Debug> Node<S> {
                 }
             }
 
-            let score = K_SPANS * num_spanning as Real
-                + K_BALANCE * ((num_front - num_back) as Real).abs();
+            let balance_score = K_BALANCE * ((num_front - num_back) as Real).abs();
+            let spanning_score = K_SPANS * num_spanning as Real;
+            let stability_score = K_STABILITY * self.calculate_stability_penalty(&plane_normal, characteristic_length);
 
-            if score < best_score {
-                best_score = score;
+            let total_score = spanning_score + balance_score + stability_score;
+
+            if total_score < best_score {
+                best_score = total_score;
                 best_plane = plane.clone();
             }
         }
         best_plane
+    }
+
+    /// Calculate numerical stability penalty for a plane normal.
+    /// Penalizes normals that are nearly axis-aligned or have very small components,
+    /// which can lead to precision issues in intersection calculations.
+    fn calculate_stability_penalty(&self, normal: &Vector3<Real>, characteristic_length: Real) -> Real {
+        let adaptive_eps = crate::float_types::adaptive_epsilon(characteristic_length);
+        let mut penalty = 0.0;
+
+        // Penalize normals with very small components (near axis-aligned)
+        let abs_components = [normal.x.abs(), normal.y.abs(), normal.z.abs()];
+        for &component in &abs_components {
+            if component < adaptive_eps * 10.0 {
+                penalty += 0.5; // Moderate penalty for near-axis alignment
+            }
+        }
+
+        // Penalize normals that are nearly zero (degenerate)
+        let normal_length = normal.norm();
+        if normal_length < adaptive_eps {
+            penalty += 10.0; // High penalty for degenerate normals
+        }
+
+        penalty
     }
 
     /// Recursively remove all polygons in `polygons` that are inside this BSP tree
@@ -127,7 +193,7 @@ impl<S: Clone + Send + Sync + Debug> Node<S> {
         let mut front_polys = Vec::with_capacity(polygons.len());
         let mut back_polys = Vec::with_capacity(polygons.len());
 
-        // Optimized polygon splitting with iterator patterns
+        // Optimized polygon splitting with enhanced numerical stability
         for polygon in polygons {
             let (coplanar_front, coplanar_back, mut front_parts, mut back_parts) =
                 plane.split_polygon(polygon);
@@ -207,7 +273,7 @@ impl<S: Clone + Send + Sync + Debug> Node<S> {
         let mut front = Vec::with_capacity(polygons.len() / 2);
         let mut back = Vec::with_capacity(polygons.len() / 2);
 
-        // Optimized polygon classification using iterator pattern
+        // Optimized polygon classification using iterator pattern with enhanced splitting
         // **Mathematical Theorem**: Each polygon is classified relative to the splitting plane
         for polygon in polygons {
             let (coplanar_front, coplanar_back, mut front_parts, mut back_parts) =

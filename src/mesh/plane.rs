@@ -66,7 +66,7 @@
 //!
 //! Unless stated otherwise, all tolerances are governed by `float_types::EPSILON`.
 
-use crate::float_types::{EPSILON, Real};
+use crate::float_types::{EPSILON, Real, adaptive_epsilon};
 use crate::mesh::polygon::Polygon;
 use crate::mesh::vertex::Vertex;
 use nalgebra::{Isometry3, Matrix4, Point3, Rotation3, Translation3, Vector3};
@@ -282,15 +282,27 @@ impl Plane {
                 z: point.z,
             },
         );
+
+        // Use adaptive epsilon for better scale-invariant classification
+        // Calculate characteristic length from plane points for adaptive tolerance
+        let char_length = (self.point_b - self.point_a).norm().max((self.point_c - self.point_a).norm());
+        let adaptive_eps = if char_length > 0.0 {
+            adaptive_epsilon(char_length)
+        } else {
+            EPSILON
+        };
+
         #[allow(clippy::useless_conversion)]
-        if sign > EPSILON.into() {
+        if sign > adaptive_eps.into() {
             BACK
-        } else if sign < (-EPSILON).into() {
+        } else if sign < (-adaptive_eps).into() {
             FRONT
         } else {
             COPLANAR
         }
     }
+
+
 
     /// Return the (right‑handed) unit normal **n** of the plane
     /// `((b‑a) × (c‑a)).normalize()`.
@@ -393,14 +405,32 @@ impl Plane {
                     // If the edge between these two vertices crosses the plane,
                     // compute intersection and add that intersection to both sets
                     if (type_i | type_j) == SPANNING {
-                        let denom = normal.dot(&(vertex_j.pos - vertex_i.pos));
-                        // Avoid dividing by zero
-                        if denom.abs() > EPSILON {
-                            let intersection =
-                                (self.offset() - normal.dot(&vertex_i.pos.coords)) / denom;
-                            let vertex_new = vertex_i.interpolate(vertex_j, intersection);
-                            split_front.push(vertex_new);
-                            split_back.push(vertex_new);
+                        // Enhanced intersection calculation with adaptive tolerance
+                        let edge_vec = vertex_j.pos - vertex_i.pos;
+                        let denom = normal.dot(&edge_vec);
+
+                        // Calculate adaptive epsilon based on edge length
+                        let edge_length = edge_vec.norm();
+                        let adaptive_eps = if edge_length > 0.0 {
+                            adaptive_epsilon(edge_length)
+                        } else {
+                            EPSILON
+                        };
+
+                        // Enhanced denominator check with adaptive tolerance
+                        if denom.abs() > adaptive_eps {
+                            // Compute intersection parameter with better numerical conditioning
+                            let numerator = self.offset() - normal.dot(&vertex_i.pos.coords);
+                            let t = numerator / denom;
+
+                            // Validate intersection parameter is within edge bounds with tolerance
+                            if t >= -adaptive_eps && t <= 1.0 + adaptive_eps {
+                                // Clamp t to valid range to prevent extrapolation errors
+                                let t_clamped = t.clamp(0.0, 1.0);
+                                let vertex_new = vertex_i.interpolate(vertex_j, t_clamped);
+                                split_front.push(vertex_new);
+                                split_back.push(vertex_new);
+                            }
                         }
                     }
                 }
@@ -418,6 +448,8 @@ impl Plane {
 
         (coplanar_front, coplanar_back, front, back)
     }
+
+
 
     /// Returns (T, T_inv), where:
     /// - `T` maps a point on this plane into XY plane (z=0) with the plane's normal going to +Z
