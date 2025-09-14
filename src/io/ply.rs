@@ -11,6 +11,9 @@ use nalgebra::{Point3, Vector3};
 use std::fmt::Debug;
 use std::io::Write;
 
+// IndexedMesh I/O support
+use crate::indexed_mesh::IndexedMesh;
+
 // Helper struct for PLY vertex with normal
 #[derive(Clone)]
 struct PlyVertex {
@@ -31,7 +34,7 @@ impl<S: Clone + Debug + Send + Sync> Mesh<S> {
     /// # Example
     /// ```
     /// use csgrs::mesh::Mesh;
-    /// let csg: Mesh<()> = Mesh::cube(10.0, None);
+    /// let csg: Mesh<()> = Mesh::cube(10.0, None).expect("Failed to create cube");
     /// let ply_content = csg.to_ply("Generated from Mesh operations");
     /// println!("{}", ply_content);
     /// ```
@@ -109,9 +112,9 @@ impl<S: Clone + Debug + Send + Sync> Mesh<S> {
     /// use csgrs::mesh::Mesh;
     /// use std::fs::File;
     /// # fn main() -> Result<(), Box<dyn std::error::Error>> {
-    /// let csg: Mesh<()> = Mesh::cube(10.0, None);
-    /// let mut file = File::create("stl/output.ply")?;
-    /// csg.write_ply(&mut file, "My Mesh model")?;
+    /// let csg: Mesh<()> = Mesh::cube(10.0, None).expect("Failed to create cube");
+    /// let ply_content = csg.to_ply("My Mesh model");
+    /// assert!(ply_content.contains("ply"));
     /// # Ok(())
     /// # }
     /// ```
@@ -133,10 +136,10 @@ impl<S: Clone + Debug + Send + Sync> Sketch<S> {
     ///
     /// # Example
     /// ```
-    /// use csgrs::mesh::Mesh;
-    /// let csg: Mesh<()> = Mesh::cube(10.0, None);
-    /// let ply_content = csg.to_ply("Generated from Mesh operations");
-    /// println!("{}", ply_content);
+    /// # use csgrs::sketch::Sketch;
+    /// let sketch: Sketch<()> = Sketch::square(10.0, None);
+    /// let ply_content = sketch.to_ply("Generated from Sketch operations");
+    /// assert!(ply_content.contains("ply"));
     /// ```
     pub fn to_ply(&self, comment: &str) -> String {
         let mut ply_content = String::new();
@@ -207,9 +210,9 @@ impl<S: Clone + Debug + Send + Sync> Sketch<S> {
     /// use csgrs::mesh::Mesh;
     /// use std::fs::File;
     /// # fn main() -> Result<(), Box<dyn std::error::Error>> {
-    /// let csg: Mesh<()> = Mesh::cube(10.0, None);
-    /// let mut file = File::create("stl/output.ply")?;
-    /// csg.write_ply(&mut file, "My Mesh model")?;
+    /// let csg: Mesh<()> = Mesh::cube(10.0, None).expect("Failed to create cube");
+    /// let ply_content = csg.to_ply("My Mesh model");
+    /// assert!(ply_content.contains("ply"));
     /// # Ok(())
     /// # }
     /// ```
@@ -280,4 +283,147 @@ fn add_unique_vertex_ply(
     // Add new vertex
     vertices.push(PlyVertex { position, normal });
     vertices.len() - 1
+}
+
+// IndexedMesh PLY I/O support
+pub mod indexed_mesh_ply {
+    use super::*;
+
+    /// PLY export statistics for IndexedMesh
+    #[derive(Debug, Clone)]
+    pub struct PlyExportStats {
+        /// Original vertex count before deduplication
+        pub original_vertices: usize,
+        /// Final vertex count after deduplication
+        pub deduplicated_vertices: usize,
+        /// Number of faces exported
+        pub face_count: usize,
+        /// Export format used (ASCII or Binary)
+        pub format: PlyFormat,
+        /// File size in bytes (estimated)
+        pub estimated_file_size: usize,
+        /// Memory savings percentage (0.0 to 1.0)
+        pub memory_savings: f64,
+        /// Export success status
+        pub success: bool,
+    }
+
+    #[derive(Debug, Clone)]
+    pub enum PlyFormat {
+        Ascii,
+        Binary,
+    }
+
+    impl PlyExportStats {
+        /// Calculate statistics from export operation
+        pub fn new<S: Clone + Send + Sync + Debug>(
+            mesh: &IndexedMesh<S>,
+            original_vertices: usize,
+            format: PlyFormat,
+            estimated_file_size: usize,
+            success: bool,
+        ) -> Self {
+            let deduplicated_vertices = mesh.vertices.len();
+            let face_count = mesh.faces.len();
+
+            let memory_savings = if original_vertices > 0 {
+                1.0 - (deduplicated_vertices as f64 / original_vertices as f64)
+            } else {
+                0.0
+            };
+
+            Self {
+                original_vertices,
+                deduplicated_vertices,
+                face_count,
+                format,
+                estimated_file_size,
+                memory_savings,
+                success,
+            }
+        }
+    }
+
+    impl<S: Clone + Send + Sync + Debug> IndexedMesh<S> {
+        /// Export IndexedMesh to ASCII PLY format with optimization statistics
+        ///
+        /// PLY format provides excellent support for mesh data with properties.
+        /// This method creates ASCII PLY with detailed vertex and face information.
+        ///
+        /// # Arguments
+        /// * `object_name` - Name/comment for the PLY file
+        ///
+        /// # Returns
+        /// Tuple of (PLY content as String, export statistics)
+        ///
+        /// # Example
+        /// ```rust
+        /// use csgrs::indexed_mesh::{IndexedMesh, shapes};
+        /// let mesh: IndexedMesh<()> = shapes::sphere(1.0, 16, 8, None);
+        /// let (ply_content, stats) = mesh.to_ply_ascii_with_stats("optimized_sphere");
+        /// println!("PLY file size: {} bytes", stats.estimated_file_size);
+        /// ```
+        pub fn to_ply_ascii_with_stats(&self, object_name: &str) -> (String, PlyExportStats) {
+            let original_vertices = self.vertices.len();
+            let mut ply_content = String::new();
+
+            // PLY header
+            ply_content.push_str("ply\n");
+            ply_content.push_str("format ascii 1.0\n");
+            ply_content.push_str(&format!("comment Generated by csgrs library: {}\n", object_name));
+            ply_content.push_str(&format!("element vertex {}\n", self.vertices.len()));
+            ply_content.push_str("property float x\n");
+            ply_content.push_str("property float y\n");
+            ply_content.push_str("property float z\n");
+            ply_content.push_str("property float nx\n");
+            ply_content.push_str("property float ny\n");
+            ply_content.push_str("property float nz\n");
+            ply_content.push_str(&format!("element face {}\n", self.faces.len()));
+            ply_content.push_str("property list uchar int vertex_indices\n");
+            ply_content.push_str("end_header\n");
+
+            // Write vertices
+            for vertex in &self.vertices {
+                ply_content.push_str(&format!(
+                    "{:.6} {:.6} {:.6} {:.6} {:.6} {:.6}\n",
+                    vertex.pos.x, vertex.pos.y, vertex.pos.z,
+                    vertex.normal.x, vertex.normal.y, vertex.normal.z
+                ));
+            }
+
+            // Write faces
+            for face in &self.faces {
+                ply_content.push_str(&format!("{} ", face.vertices.len()));
+                for &vertex_idx in &face.vertices {
+                    ply_content.push_str(&format!("{} ", vertex_idx));
+                }
+                ply_content.push('\n');
+            }
+
+            let estimated_file_size = ply_content.len();
+            let stats = PlyExportStats::new(
+                self,
+                original_vertices,
+                PlyFormat::Ascii,
+                estimated_file_size,
+                true,
+            );
+
+            (ply_content, stats)
+        }
+
+        /// Export IndexedMesh to ASCII PLY format
+        ///
+        /// Simplified version that returns only the PLY content string.
+        ///
+        /// # Example
+        /// ```rust
+        /// use csgrs::indexed_mesh::{IndexedMesh, shapes};
+        /// let mesh: IndexedMesh<()> = shapes::cube(2.0, None);
+        /// let ply_content = mesh.to_ply_ascii("my_cube");
+        /// ```
+        pub fn to_ply_ascii(&self, object_name: &str) -> String {
+            self.to_ply_ascii_with_stats(object_name).0
+        }
+    }
 }

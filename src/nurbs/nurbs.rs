@@ -37,7 +37,7 @@ use curvo::prelude::KnotStyle;
 use crate::float_types::{parry3d::bounding_volume::Aabb, Real};
 use curvo::prelude::FloatingPoint;
 use curvo::region::{CompoundCurve, Region};
-use crate::traits::CSGOps;
+use crate::traits::CSG;
 
 use nalgebra::{Matrix4, Point3, Translation3, Vector3};
 
@@ -123,7 +123,7 @@ impl<S: Clone + Send + Sync + std::fmt::Debug> Nurbs<S> {
  * Core boolean + transform behaviour – we simply delegate to Curvo
  * ============================================================================= */
 
-impl<S: Clone + Send + Sync + std::fmt::Debug> CSGOps for Nurbs<S> {
+impl<S: Clone + Send + Sync + std::fmt::Debug> CSG for Nurbs<S> {
     fn new() -> Self {
         // An *empty* region has no polygons; represent with a degenerate square
         // of zero area.

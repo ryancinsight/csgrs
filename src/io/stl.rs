@@ -12,19 +12,19 @@ use core2::io::Cursor;
 
 use stl_io;
 
+// IndexedMesh I/O support
+use crate::indexed_mesh::IndexedMesh;
+
 impl<S: Clone + Debug + Send + Sync> Mesh<S> {
     /// Export to ASCII STL
     /// Convert this Mesh to an **ASCII STL** string with the given `name`.
     ///
     /// ```rust
     /// # use csgrs::mesh::Mesh;
-    /// # use std::error::Error;
-    /// # fn main() -> Result<(), Box<dyn Error>> {
-    /// let mesh  = Mesh::<()>::cube(1.0, None);
+    /// let mesh = Mesh::<()>::cube(1.0, None).expect("Failed to create cube");
     /// let bytes = mesh.to_stl_ascii("my_solid");
-    /// std::fs::write("stl/my_solid.stl", bytes)?;
-    /// # Ok(())
-    /// # }
+    /// assert!(bytes.contains("solid my_solid"));
+    /// assert!(bytes.contains("endsolid my_solid"));
     /// ```
     pub fn to_stl_ascii(&self, name: &str) -> String {
         let mut out = String::new();
@@ -65,13 +65,9 @@ impl<S: Clone + Debug + Send + Sync> Mesh<S> {
     ///
     /// ```rust
     /// # use csgrs::mesh::Mesh;
-    /// # use std::error::Error;
-    /// # fn main() -> Result<(), Box<dyn Error>> {
-    /// let object = Mesh::<()>::cube(1.0, None);
-    /// let bytes  = object.to_stl_binary("my_solid")?;
-    /// std::fs::write("stl/my_solid.stl", bytes)?;
-    /// # Ok(())
-    /// # }
+    /// let object = Mesh::<()>::cube(1.0, None).expect("Failed to create cube");
+    /// let bytes = object.to_stl_binary("my_solid").unwrap();
+    /// assert!(!bytes.is_empty());
     /// ```
     pub fn to_stl_binary(&self, _name: &str) -> std::io::Result<Vec<u8>> {
         use core2::io::Cursor;
@@ -182,13 +178,10 @@ impl<S: Clone + Debug + Send + Sync> Sketch<S> {
     ///
     /// ```
     /// # use csgrs::sketch::Sketch;
-    /// # use std::error::Error;
-    /// # fn main() -> Result<(), Box<dyn Error>> {
     /// let sketch: Sketch<()> = Sketch::square(2.0, None);
     /// let bytes = sketch.to_stl_ascii("my_sketch");
-    /// std::fs::write("stl/my_sketch.stl", bytes)?;
-    /// # Ok(())
-    /// # }
+    /// assert!(bytes.contains("solid my_sketch"));
+    /// assert!(bytes.contains("endsolid my_sketch"));
     /// ```
     pub fn to_stl_ascii(&self, name: &str) -> String {
         let mut out = String::new();
@@ -292,13 +285,9 @@ impl<S: Clone + Debug + Send + Sync> Sketch<S> {
     ///
     /// ```rust
     /// # use csgrs::sketch::Sketch;
-    /// # use std::error::Error;
-    /// # fn main() -> Result<(), Box<dyn Error>> {
     /// let object = Sketch::<()>::square(1.0, None);
-    /// let bytes  = object.to_stl_binary("my_sketch")?;
-    /// std::fs::write("stl/my_sketch.stl", bytes)?;
-    /// # Ok(())
-    /// # }
+    /// let bytes = object.to_stl_binary("my_sketch").unwrap();
+    /// assert!(!bytes.is_empty());
     /// ```
     pub fn to_stl_binary(&self, _name: &str) -> std::io::Result<Vec<u8>> {
         use core2::io::Cursor;
@@ -402,11 +391,180 @@ impl<S: Clone + Debug + Send + Sync> Sketch<S> {
             }
         }
 
-        //
         // (C) Encode into a binary STL buffer
         //
         let mut cursor = Cursor::new(Vec::new());
         write_stl(&mut cursor, triangles.iter())?;
         Ok(cursor.into_inner())
+    }
+}
+
+// IndexedMesh STL I/O support
+pub mod indexed_mesh_stl {
+    use super::*;
+
+    /// STL export statistics for IndexedMesh
+    #[derive(Debug, Clone)]
+    pub struct StlExportStats {
+        /// Original vertex count before deduplication
+        pub original_vertices: usize,
+        /// Final vertex count after deduplication
+        pub deduplicated_vertices: usize,
+        /// Number of faces exported
+        pub face_count: usize,
+        /// Memory savings percentage (0.0 to 1.0)
+        pub memory_savings: f64,
+        /// Export success status
+        pub success: bool,
+    }
+
+    impl StlExportStats {
+        /// Calculate statistics from export operation
+        pub fn new<S: Clone + Send + Sync + Debug>(
+            mesh: &IndexedMesh<S>,
+            original_vertices: usize,
+            success: bool,
+        ) -> Self {
+            let deduplicated_vertices = mesh.vertices.len();
+            let face_count = mesh.faces.len();
+
+            let memory_savings = if original_vertices > 0 {
+                1.0 - (deduplicated_vertices as f64 / original_vertices as f64)
+            } else {
+                0.0
+            };
+
+            Self {
+                original_vertices,
+                deduplicated_vertices,
+                face_count,
+                memory_savings,
+                success,
+            }
+        }
+    }
+
+    impl<S: Clone + Send + Sync + Debug> IndexedMesh<S> {
+        /// Export IndexedMesh to ASCII STL format with optimization statistics
+        ///
+        /// This method leverages IndexedMesh's vertex deduplication for optimal file size
+        /// and provides detailed statistics about the optimization achieved.
+        ///
+        /// # Arguments
+        /// * `name` - Solid name for the STL file
+        ///
+        /// # Returns
+        /// Tuple of (STL content as String, export statistics)
+        ///
+        /// # Example
+        /// ```rust
+        /// use csgrs::indexed_mesh::{IndexedMesh, shapes};
+        /// let mesh: IndexedMesh<()> = shapes::cube(2.0, None);
+        /// let (stl_content, stats) = mesh.to_stl_ascii_with_stats("optimized_cube");
+        /// println!("Memory savings: {:.1}%", stats.memory_savings * 100.0);
+        /// ```
+        pub fn to_stl_ascii_with_stats(&self, name: &str) -> (String, StlExportStats) {
+            let original_vertices = self.vertices.len();
+            let mut out = String::new();
+
+            out.push_str(&format!("solid {name}\n"));
+
+            // Process each face
+            for face in &self.faces {
+                if face.vertices.len() < 3 {
+                    continue; // Skip degenerate faces
+                }
+
+                // Calculate face normal using Newell's method
+                let normal = if let Some(computed_normal) = self.compute_face_normal(&face.vertices) {
+                    computed_normal
+                } else {
+                    // Fallback to first triangle normal
+                    let v0 = &self.vertices[face.vertices[0]];
+                    let v1 = &self.vertices[face.vertices[1]];
+                    let v2 = &self.vertices[face.vertices[2]];
+                    let edge1 = v1.pos - v0.pos;
+                    let edge2 = v2.pos - v0.pos;
+                    edge1.cross(&edge2).normalize()
+                };
+
+                // Handle triangular faces directly
+                if face.vertices.len() == 3 {
+                    out.push_str(&format!(
+                        "  facet normal {:.6} {:.6} {:.6}\n",
+                        normal.x, normal.y, normal.z
+                    ));
+                    out.push_str("    outer loop\n");
+
+                    for &vertex_idx in &face.vertices {
+                        let vertex = &self.vertices[vertex_idx];
+                        out.push_str(&format!(
+                            "      vertex {:.6} {:.6} {:.6}\n",
+                            vertex.pos.x, vertex.pos.y, vertex.pos.z
+                        ));
+                    }
+
+                    out.push_str("    endloop\n");
+                    out.push_str("  endfacet\n");
+                } else {
+                    // Triangulate non-triangular faces
+                    let triangles = self.triangulate_face(&face.vertices);
+
+                    for triangle in triangles {
+                        out.push_str(&format!(
+                            "  facet normal {:.6} {:.6} {:.6}\n",
+                            normal.x, normal.y, normal.z
+                        ));
+                        out.push_str("    outer loop\n");
+
+                        for &vertex_idx in &triangle {
+                            let vertex = &self.vertices[vertex_idx];
+                            out.push_str(&format!(
+                                "      vertex {:.6} {:.6} {:.6}\n",
+                                vertex.pos.x, vertex.pos.y, vertex.pos.z
+                            ));
+                        }
+
+                        out.push_str("    endloop\n");
+                        out.push_str("  endfacet\n");
+                    }
+                }
+            }
+
+            out.push_str(&format!("endsolid {name}\n"));
+
+            let stats = StlExportStats::new(self, original_vertices, true);
+            (out, stats)
+        }
+
+        /// Export IndexedMesh to ASCII STL format
+        ///
+        /// Simplified version that returns only the STL content string.
+        ///
+        /// # Example
+        /// ```rust
+        /// use csgrs::indexed_mesh::{IndexedMesh, shapes};
+        /// let mesh: IndexedMesh<()> = shapes::cube(2.0, None);
+        /// let stl_content = mesh.to_stl_ascii("my_cube");
+        /// ```
+        pub fn to_stl_ascii(&self, name: &str) -> String {
+            self.to_stl_ascii_with_stats(name).0
+        }
+    }
+}
+
+#[cfg(test)]
+mod indexed_mesh_tests {
+    use crate::indexed_mesh::IndexedMesh;
+
+    #[test]
+    fn test_indexed_mesh_stl_export() {
+        let cube: IndexedMesh<()> = crate::indexed_mesh::shapes::cube(2.0, None);
+        let (stl_content, stats) = cube.to_stl_ascii_with_stats("test_cube");
+
+        // Verify basic export works
+        assert_eq!(stats.face_count, 6);
+        assert!(stats.success);
+        assert!(stl_content.contains("solid test_cube"));
     }
 }

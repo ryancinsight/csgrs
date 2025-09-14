@@ -1,5 +1,6 @@
 use crate::float_types::Real;
 use nalgebra::Point3;
+use std::fmt;
 
 /// All the possible validation issues we might encounter,
 #[derive(Debug, Clone, PartialEq)]
@@ -30,9 +31,54 @@ pub enum ValidationError {
     IndexOutOfRange,
     /// (InvalidArguments) operation requires polygons with same number of vertices
     InvalidArguments,
+    /// Invalid dimension for shape construction (negative, zero, or infinite)
+    InvalidDimension(String, Real),
+    /// Invalid parameter for shape construction (wrong range, type, etc.)
+    InvalidShapeParameter(String, String),
     /// In general, anything else
     Other(String, Option<Point3<Real>>),
 }
+
+impl fmt::Display for ValidationError {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            ValidationError::RepeatedPoint(p) => write!(f, "Repeated point at {:?}", p),
+            ValidationError::HoleOutsideShell(p) => write!(f, "Hole outside shell at {:?}", p),
+            ValidationError::NestedHoles(p) => write!(f, "Nested holes at {:?}", p),
+            ValidationError::DisconnectedInterior(p) => {
+                write!(f, "Disconnected interior at {:?}", p)
+            },
+            ValidationError::SelfIntersection(p) => write!(f, "Self-intersection at {:?}", p),
+            ValidationError::RingSelfIntersection(p) => {
+                write!(f, "Ring self-intersection at {:?}", p)
+            },
+            ValidationError::NestedShells(p) => write!(f, "Nested shells at {:?}", p),
+            ValidationError::TooFewPoints(p) => write!(f, "Too few points at {:?}", p),
+            ValidationError::InvalidCoordinate(p) => {
+                write!(f, "Invalid coordinate at {:?}", p)
+            },
+            ValidationError::RingNotClosed(p) => write!(f, "Ring not closed at {:?}", p),
+            ValidationError::MismatchedVertices => write!(f, "Mismatched vertices"),
+            ValidationError::IndexOutOfRange => write!(f, "Index out of range"),
+            ValidationError::InvalidArguments => write!(f, "Invalid arguments"),
+            ValidationError::InvalidDimension(param, value) => {
+                write!(f, "Invalid {} dimension: {} (must be positive and finite)", param, value)
+            },
+            ValidationError::InvalidShapeParameter(param, reason) => {
+                write!(f, "Invalid {} parameter: {}", param, reason)
+            },
+            ValidationError::Other(msg, p) => {
+                if let Some(point) = p {
+                    write!(f, "{} at {:?}", msg, point)
+                } else {
+                    write!(f, "{}", msg)
+                }
+            },
+        }
+    }
+}
+
+impl std::error::Error for ValidationError {}
 
 // Plane::from_points "Degenerate polygon: vertices do not define a plane"
 // Mesh::polyhedron "Face index {} is out of range (points.len = {})."

@@ -1,6 +1,6 @@
 //! Provides a `MetaBall` struct and functions for creating a `Sketch` from [MetaBalls](https://en.wikipedia.org/wiki/Metaballs)
 
-use crate::float_types::{EPSILON, Real};
+use crate::float_types::Real;
 use crate::sketch::Sketch;
 use crate::traits::CSG;
 use geo::{
@@ -68,7 +68,7 @@ impl<S: Clone + Debug + Send + Sync> Sketch<S> {
                     if distance_sq > threshold_distance_sq {
                         0.0
                     } else {
-                        let denominator = distance_sq + EPSILON;
+                        let denominator = distance_sq + crate::float_types::EPSILON;
                         (radius * radius) / denominator
                     }
                 })
@@ -94,7 +94,7 @@ impl<S: Clone + Debug + Send + Sync> Sketch<S> {
                            (x2, y2, v2): (Real, Real, Real)|
          -> (Real, Real) {
             let denom = (v2 - v1).abs();
-            if denom < EPSILON {
+            if denom < crate::float_types::EPSILON {
                 (x1, y1)
             } else {
                 let t = -v1 / (v2 - v1); // crossing at 0
@@ -214,7 +214,9 @@ fn stitch(contours: &[LineString<Real>]) -> Vec<LineString<Real>> {
 
         // walk forward
         loop {
-            let last = *chain.last().unwrap();
+            let Some(last) = chain.last().copied() else {
+                break; // Empty chain - should not happen with valid input
+            };
             let Some(cands) = adj.get(&key(last.x, last.y)) else {
                 break;
             };
@@ -236,8 +238,12 @@ fn stitch(contours: &[LineString<Real>]) -> Vec<LineString<Real>> {
         }
 
         // close if ends coincide
-        if chain.len() >= 3 && (chain[0] != *chain.last().unwrap()) {
-            chain.push(chain[0]);
+        if chain.len() >= 3 {
+            if let (Some(first), Some(last)) = (chain.first(), chain.last()) {
+                if first != last {
+                    chain.push(*first);
+                }
+            }
         }
         chains.push(LineString::new(chain));
     }

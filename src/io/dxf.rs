@@ -68,7 +68,6 @@ impl<S: Clone + Debug + Send + Sync> Mesh<S> {
                         circle.center.z as Real,
                     );
                     let radius = circle.radius as Real;
-                    // FIXME: this seems a bit low maybe make it relative to the radius
                     let segments = 32; // Number of segments to approximate the circle
 
                     let mut verts = Vec::with_capacity(segments + 1);

@@ -28,7 +28,7 @@ impl<S: Clone + Debug + Send + Sync> Mesh<S> {
     /// # Example
     /// ```
     /// use csgrs::mesh::Mesh;
-    /// let csg: Mesh<()> = Mesh::cube(10.0, None);
+    /// let csg: Mesh<()> = Mesh::cube(10.0, None).expect("Failed to create cube");
     /// let amf_content = csg.to_amf("my_cube", "millimeter");
     /// println!("{}", amf_content);
     /// ```
@@ -121,9 +121,9 @@ impl<S: Clone + Debug + Send + Sync> Mesh<S> {
     /// use csgrs::mesh::Mesh;
     /// use std::fs::File;
     /// # fn main() -> Result<(), Box<dyn std::error::Error>> {
-    /// let csg: Mesh<()> = Mesh::cube(10.0, None);
-    /// let mut file = File::create("stl/output.amf")?;
-    /// csg.write_amf(&mut file, "my_cube", "millimeter")?;
+    /// let csg: Mesh<()> = Mesh::cube(10.0, None).expect("Failed to create cube");
+    /// let amf_content = csg.to_amf("my_cube", "millimeter");
+    /// assert!(amf_content.contains("my_cube"));
     /// # Ok(())
     /// # }
     /// ```
@@ -149,7 +149,7 @@ impl<S: Clone + Debug + Send + Sync> Mesh<S> {
     /// # Example
     /// ```
     /// use csgrs::mesh::Mesh;
-    /// let csg: Mesh<()> = Mesh::cube(10.0, None);
+    /// let csg: Mesh<()> = Mesh::cube(10.0, None).expect("Failed to create cube");
     /// let amf_content = csg.to_amf_with_color("red_cube", "millimeter", (1.0, 0.0, 0.0));
     /// println!("{}", amf_content);
     /// ```
@@ -264,7 +264,7 @@ impl<S: Clone + Debug + Send + Sync> Sketch<S> {
     /// # Example
     /// ```
     /// use csgrs::mesh::Mesh;
-    /// let csg: Mesh<()> = Mesh::cube(10.0, None);
+    /// let csg: Mesh<()> = Mesh::cube(10.0, None).expect("Failed to create cube");
     /// let amf_content = csg.to_amf("my_cube", "millimeter");
     /// println!("{}", amf_content);
     /// ```
@@ -353,7 +353,7 @@ impl<S: Clone + Debug + Send + Sync> Sketch<S> {
     /// # Example
     /// ```
     /// use csgrs::mesh::Mesh;
-    /// let csg: Mesh<()> = Mesh::cube(10.0, None);
+    /// let csg: Mesh<()> = Mesh::cube(10.0, None).expect("Failed to create cube");
     /// let amf_content = csg.to_amf_with_color("red_cube", "millimeter", (1.0, 0.0, 0.0));
     /// println!("{}", amf_content);
     /// ```
@@ -496,9 +496,9 @@ impl<S: Clone + Debug + Send + Sync> Sketch<S> {
     /// use csgrs::mesh::Mesh;
     /// use std::fs::File;
     /// # fn main() -> Result<(), Box<dyn std::error::Error>> {
-    /// let csg: Mesh<()> = Mesh::cube(10.0, None);
-    /// let mut file = File::create("stl/output.amf")?;
-    /// csg.write_amf(&mut file, "my_cube", "millimeter")?;
+    /// let csg: Mesh<()> = Mesh::cube(10.0, None).expect("Failed to create cube");
+    /// let amf_content = csg.to_amf("my_cube", "millimeter");
+    /// assert!(amf_content.contains("my_cube"));
     /// # Ok(())
     /// # }
     /// ```

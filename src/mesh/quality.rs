@@ -1,4 +1,4 @@
-use crate::float_types::{PI, Real};
+use crate::float_types::Real;
 use crate::mesh::Mesh;
 use crate::mesh::vertex::Vertex;
 use std::fmt::Debug;
@@ -143,7 +143,10 @@ impl<S: Clone + Debug + Send + Sync> Mesh<S> {
         let len_ca = ca.norm();
 
         // Handle degenerate cases
-        if len_ab < Real::EPSILON || len_bc < Real::EPSILON || len_ca < Real::EPSILON {
+        if len_ab < crate::float_types::EPSILON
+            || len_bc < crate::float_types::EPSILON
+            || len_ca < crate::float_types::EPSILON
+        {
             return TriangleQuality {
                 aspect_ratio: Real::INFINITY,
                 min_angle: 0.0,
@@ -157,7 +160,7 @@ impl<S: Clone + Debug + Send + Sync> Mesh<S> {
         // Triangle area using cross product
         let area = 0.5 * ab.cross(&(-ca)).norm();
 
-        if area < Real::EPSILON {
+        if area < crate::float_types::EPSILON {
             return TriangleQuality {
                 aspect_ratio: Real::INFINITY,
                 min_angle: 0.0,
@@ -194,7 +197,7 @@ impl<S: Clone + Debug + Send + Sync> Mesh<S> {
         let aspect_ratio = circumradius / inradius;
 
         // Quality score: weighted combination of metrics
-        let angle_quality = (min_angle / (PI / 6.0)).min(1.0); // Normalized to 30°
+        let angle_quality = (min_angle / (crate::float_types::PI / 6.0)).min(1.0); // Normalized to 30°
         let shape_quality = (1.0 / aspect_ratio).min(1.0);
         let edge_quality = (3.0 / edge_ratio).min(1.0);
 
@@ -265,7 +268,11 @@ impl<S: Clone + Debug + Send + Sync> Mesh<S> {
                     .windows(2)
                     .map(|w| (w[1].pos - w[0].pos).norm())
                     .chain(std::iter::once(
-                        (poly.vertices[0].pos - poly.vertices.last().unwrap().pos).norm(),
+                        if let Some(last_vertex) = poly.vertices.last() {
+                            (poly.vertices[0].pos - last_vertex.pos).norm()
+                        } else {
+                            0.0 // Degenerate polygon with single vertex
+                        },
                     ))
             })
             .collect();

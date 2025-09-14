@@ -3,7 +3,6 @@
 //!
 //! ![Example CSG output][Example CSG output]
 #![cfg_attr(doc, doc = doc_image_embed::embed_image!("Example CSG output", "docs/csg.png"))]
-//!
 //! # Features
 //! #### Default
 //! - **f64**: use f64 as Real
@@ -30,7 +29,9 @@
 #![warn(clippy::missing_const_for_fn, clippy::approx_constant, clippy::all)]
 
 pub mod errors;
+pub mod examples;
 pub mod float_types;
+pub mod indexed_mesh;
 pub mod io;
 pub mod mesh;
 pub mod nurbs;
@@ -44,11 +45,13 @@ pub mod voxels;
 ))]
 compile_error!("Either 'delaunay' or 'earcut' feature must be specified, but not both");
 
-#[cfg(any(
-    all(feature = "f64", feature = "f32"),
-    not(any(feature = "f64", feature = "f32"))
-))]
-compile_error!("Either 'f64' or 'f32' feature must be specified, but not both");
+// Fix: f32 and f64 are mutually exclusive, but default features include both
+// This should be a runtime check or better feature gating
+#[cfg(all(feature = "f64", feature = "f32"))]
+compile_error!("Features 'f64' and 'f32' are mutually exclusive - specify only one");
+
+#[cfg(not(any(feature = "f64", feature = "f32")))]
+compile_error!("Either 'f64' or 'f32' feature must be specified");
 
 #[cfg(test)]
 mod tests;

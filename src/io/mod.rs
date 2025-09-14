@@ -4,14 +4,23 @@ pub mod svg;
 #[cfg(feature = "stl-io")]
 mod stl;
 
+#[cfg(feature = "stl-io")]
+pub use stl::indexed_mesh_stl;
+
 #[cfg(feature = "dxf-io")]
 mod dxf;
 
 #[cfg(feature = "obj-io")]
 mod obj;
 
+#[cfg(feature = "obj-io")]
+pub use obj::indexed_mesh_obj;
+
 #[cfg(feature = "ply-io")]
 mod ply;
+
+#[cfg(feature = "ply-io")]
+pub use ply::indexed_mesh_ply;
 
 #[cfg(feature = "amf-io")]
 mod amf;

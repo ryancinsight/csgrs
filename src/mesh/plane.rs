@@ -55,7 +55,7 @@
 //! ## **Numerical Stability**
 //!
 //! - **Robust Predicates**: Uses exact arithmetic for orientation tests
-//! - **Epsilon Tolerances**: Governed by `float_types::EPSILON` for floating-point comparisons
+//! - **Epsilon Tolerances**: Governed by `crate::float_types::EPSILON` for floating-point comparisons
 //! - **Degenerate Case Handling**: Proper fallbacks for collinear points and zero-area triangles
 //!
 //! ## **Algorithm Complexity**
@@ -64,16 +64,16 @@
 //! - **Orientation Testing**: O(1) per point with robust predicates
 //! - **Polygon Splitting**: O(n) per polygon, where n is the number of vertices
 //!
-//! Unless stated otherwise, all tolerances are governed by `float_types::EPSILON`.
+//! Unless stated otherwise, all tolerances are governed by `crate::float_types::EPSILON`.
 
-use crate::float_types::{EPSILON, Real};
+use crate::float_types::Real;
 use crate::mesh::polygon::Polygon;
 use crate::mesh::vertex::Vertex;
 use nalgebra::{Isometry3, Matrix4, Point3, Rotation3, Translation3, Vector3};
 use robust::{Coord3D, orient3d};
 
 /// Classification of a polygon or point that lies exactly in the plane
-/// (i.e. within `±EPSILON` of the plane).
+/// (i.e. within `±crate::float_types::EPSILON` of the plane).
 pub const COPLANAR: i8 = 0;
 
 /// Classification of a polygon or point that lies strictly on the
@@ -168,7 +168,7 @@ impl Plane {
         let p0 = vertices[i0].pos;
         let p1 = vertices[i1].pos;
         let dir = p1 - p0;
-        if dir.norm_squared() < EPSILON * EPSILON {
+        if dir.norm_squared() < crate::float_types::EPSILON * crate::float_types::EPSILON {
             return reference_plane; // everything almost coincident
         }
 
@@ -186,7 +186,7 @@ impl Plane {
             return reference_plane;
         };
 
-        let i2 = if max_area2 > EPSILON * EPSILON {
+        let i2 = if max_area2 > crate::float_types::EPSILON * crate::float_types::EPSILON {
             i2
         } else {
             return reference_plane; // all vertices collinear
@@ -220,8 +220,14 @@ impl Plane {
     /// If `normal` is close to zero the function fails
     pub fn from_normal(normal: Vector3<Real>, offset: Real) -> Self {
         let n2 = normal.norm_squared();
-        if n2 < EPSILON * EPSILON {
-            panic!(); // degenerate normal
+        if n2 < crate::float_types::EPSILON * crate::float_types::EPSILON {
+            // Create a fallback plane using three points for degenerate normal
+            let vertices = vec![
+                Vertex::new(Point3::origin(), Vector3::z()),
+                Vertex::new(Point3::new(1.0, 0.0, 0.0), Vector3::z()),
+                Vertex::new(Point3::new(0.0, 1.0, 0.0), Vector3::z()),
+            ];
+            return Self::from_vertices(vertices);
         }
 
         // Point on the plane:  p0 = n * o / (n·n)
@@ -283,9 +289,9 @@ impl Plane {
             },
         );
         #[allow(clippy::useless_conversion)]
-        if sign > EPSILON.into() {
+        if sign > crate::float_types::EPSILON {
             BACK
-        } else if sign < (-EPSILON).into() {
+        } else if sign < -crate::float_types::EPSILON {
             FRONT
         } else {
             COPLANAR
@@ -298,8 +304,13 @@ impl Plane {
     pub fn normal(&self) -> Vector3<Real> {
         let n = (self.point_b - self.point_a).cross(&(self.point_c - self.point_a));
         let len = n.norm();
-        if len < EPSILON {
-            Vector3::zeros()
+
+        // Use a more appropriate threshold for very small coordinates
+        // For extremely small triangles, we still want a valid unit normal
+        if len < Real::MIN_POSITIVE {
+            // For degenerate triangles, return a default normal
+            // This ensures we always return a valid unit vector
+            Vector3::z()
         } else {
             n / len
         }
@@ -395,7 +406,7 @@ impl Plane {
                     if (type_i | type_j) == SPANNING {
                         let denom = normal.dot(&(vertex_j.pos - vertex_i.pos));
                         // Avoid dividing by zero
-                        if denom.abs() > EPSILON {
+                        if denom.abs() > crate::float_types::EPSILON {
                             let intersection =
                                 (self.offset() - normal.dot(&vertex_i.pos.coords)) / denom;
                             let vertex_new = vertex_i.interpolate(vertex_j, intersection);
@@ -434,7 +445,7 @@ impl Plane {
         // Normal
         let n = self.normal();
         let n_len = n.norm();
-        if n_len < EPSILON {
+        if n_len < crate::float_types::EPSILON {
             // Degenerate plane, return identity
             return (Matrix4::identity(), Matrix4::identity());
         }

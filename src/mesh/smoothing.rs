@@ -328,7 +328,7 @@ impl<S: Clone + Debug + Send + Sync> Mesh<S> {
             }
 
             if should_refine {
-                let subdivided = polygon.subdivide_triangles(1.try_into().unwrap());
+                let subdivided = polygon.subdivide_triangles(core::num::NonZeroU32::MIN);
                 for triangle in subdivided {
                     let vertices = triangle.to_vec();
                     refined_polygons.push(Polygon::new(vertices, polygon.metadata.clone()));
@@ -380,7 +380,7 @@ impl<S: Clone + Debug + Send + Sync> Mesh<S> {
             let keep_triangle = if i < qualities.len() {
                 let quality = &qualities[i];
                 quality.quality_score >= min_quality
-                    && quality.area > Real::EPSILON
+                    && quality.area > crate::float_types::EPSILON
                     && quality.min_angle > (5.0 as Real).to_radians()
                     && quality.aspect_ratio < 20.0
             } else {

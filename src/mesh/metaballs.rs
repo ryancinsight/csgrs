@@ -1,6 +1,6 @@
 //! Provides a `MetaBall` struct and functions for creating a `Mesh` from [MetaBalls](https://en.wikipedia.org/wiki/Metaballs)
 
-use crate::float_types::{EPSILON, Real};
+use crate::float_types::Real;
 use crate::mesh::Mesh;
 use crate::mesh::polygon::Polygon;
 use crate::mesh::vertex::Vertex;
@@ -34,7 +34,7 @@ impl MetaBall {
         }
 
         // Numerically stable influence calculation with epsilon
-        let denominator = distance_squared + EPSILON;
+        let denominator = distance_squared + crate::float_types::EPSILON;
         (self.radius * self.radius) / denominator
     }
 }
@@ -126,6 +126,7 @@ impl<S: Clone + Debug + Send + Sync> Mesh<S> {
         }
         impl fast_surface_nets::ndshape::Shape<3> for GridShape {
             type Coord = u32;
+
             #[inline]
             fn as_array(&self) -> [Self::Coord; 3] {
                 [self.nx, self.ny, self.nz]

@@ -75,7 +75,7 @@ impl<S: Clone + Debug + Send + Sync> Mesh<S> {
     ///
     /// Returns (vertex_map, adjacency_graph) for robust mesh processing.
     pub fn build_connectivity(&self) -> (VertexIndexMap, HashMap<usize, Vec<usize>>) {
-        let mut vertex_map = VertexIndexMap::new(Real::EPSILON * 100.0); // Tolerance for vertex matching
+        let mut vertex_map = VertexIndexMap::new(crate::float_types::EPSILON * 100.0); // Tolerance for vertex matching
         let mut adjacency: HashMap<usize, Vec<usize>> = HashMap::new();
 
         // First pass: build vertex index mapping

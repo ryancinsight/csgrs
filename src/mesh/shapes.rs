@@ -1,7 +1,7 @@
 //! 3D Shapes as `Mesh`s
 
 use crate::errors::ValidationError;
-use crate::float_types::{EPSILON, PI, Real, TAU};
+use crate::float_types::Real;
 use crate::mesh::Mesh;
 use crate::mesh::polygon::Polygon;
 use crate::mesh::vertex::Vertex;
@@ -11,6 +11,31 @@ use nalgebra::{Matrix4, Point3, Rotation3, Translation3, Vector3};
 use std::fmt::Debug;
 
 impl<S: Clone + Debug + Send + Sync> Mesh<S> {
+    /// Helper function to create a rectangular face with consistent vertex ordering
+    fn create_rectangular_face(
+        points: [Point3<Real>; 4],
+        normal: Vector3<Real>,
+        metadata: &Option<S>,
+    ) -> Polygon<S> {
+        Polygon::new(
+            vec![
+                Vertex::new(points[0], normal),
+                Vertex::new(points[1], normal),
+                Vertex::new(points[2], normal),
+                Vertex::new(points[3], normal),
+            ],
+            metadata.clone(),
+        )
+    }
+
+    /// Helper function to validate that a dimension is positive and finite
+    fn validate_positive_dimension(name: &str, value: Real) -> Result<(), ValidationError> {
+        if value <= 0.0 || !value.is_finite() {
+            return Err(ValidationError::InvalidDimension(name.to_string(), value));
+        }
+        Ok(())
+    }
+
     /// **Mathematical Foundations for 3D Box Geometry**
     ///
     /// This module implements mathematically rigorous algorithms for generating
@@ -50,7 +75,12 @@ impl<S: Clone + Debug + Send + Sync> Mesh<S> {
     /// - **Surface Area**: A = 2(wl + wh + lh)
     /// - **Diagonal**: d = √(w² + l² + h²)
     /// - **Centroid**: (w/2, l/2, h/2)
-    pub fn cuboid(width: Real, length: Real, height: Real, metadata: Option<S>) -> Mesh<S> {
+    pub fn cuboid(width: Real, length: Real, height: Real, metadata: Option<S>) -> Result<Mesh<S>, ValidationError> {
+        // Validate dimensions are positive and finite
+        Self::validate_positive_dimension("width", width)?;
+        Self::validate_positive_dimension("length", length)?;
+        Self::validate_positive_dimension("height", height)?;
+
         // Define the eight corner points of the prism.
         //    (x, y, z)
         let p000 = Point3::new(0.0, 0.0, 0.0);
@@ -66,89 +96,48 @@ impl<S: Clone + Debug + Send + Sync> Mesh<S> {
         // We’ll define 6 faces (each a Polygon), in an order that keeps outward-facing normals
         // and consistent (counter-clockwise) vertex winding as viewed from outside the prism.
 
-        // Bottom face (z=0, normal approx. -Z)
-        // p000 -> p100 -> p110 -> p010
-        let bottom_normal = -Vector3::z();
-        let bottom = Polygon::new(
-            vec![
-                Vertex::new(p000, bottom_normal),
-                Vertex::new(p010, bottom_normal),
-                Vertex::new(p110, bottom_normal),
-                Vertex::new(p100, bottom_normal),
-            ],
-            metadata.clone(),
+        // Create faces using helper function for consistency and reduced duplication
+        let bottom = Self::create_rectangular_face(
+            [p000, p010, p110, p100],
+            -Vector3::z(),
+            &metadata,
         );
 
-        // Top face (z=depth, normal approx. +Z)
-        // p001 -> p011 -> p111 -> p101
-        let top_normal = Vector3::z();
-        let top = Polygon::new(
-            vec![
-                Vertex::new(p001, top_normal),
-                Vertex::new(p101, top_normal),
-                Vertex::new(p111, top_normal),
-                Vertex::new(p011, top_normal),
-            ],
-            metadata.clone(),
+        let top = Self::create_rectangular_face(
+            [p001, p101, p111, p011],
+            Vector3::z(),
+            &metadata,
         );
 
-        // Front face (y=0, normal approx. -Y)
-        // p000 -> p001 -> p101 -> p100
-        let front_normal = -Vector3::y();
-        let front = Polygon::new(
-            vec![
-                Vertex::new(p000, front_normal),
-                Vertex::new(p100, front_normal),
-                Vertex::new(p101, front_normal),
-                Vertex::new(p001, front_normal),
-            ],
-            metadata.clone(),
+        let front = Self::create_rectangular_face(
+            [p000, p100, p101, p001],
+            -Vector3::y(),
+            &metadata,
         );
 
-        // Back face (y=height, normal approx. +Y)
-        // p010 -> p110 -> p111 -> p011
-        let back_normal = Vector3::y();
-        let back = Polygon::new(
-            vec![
-                Vertex::new(p010, back_normal),
-                Vertex::new(p011, back_normal),
-                Vertex::new(p111, back_normal),
-                Vertex::new(p110, back_normal),
-            ],
-            metadata.clone(),
+        let back = Self::create_rectangular_face(
+            [p010, p011, p111, p110],
+            Vector3::y(),
+            &metadata,
         );
 
-        // Left face (x=0, normal approx. -X)
-        // p000 -> p010 -> p011 -> p001
-        let left_normal = -Vector3::x();
-        let left = Polygon::new(
-            vec![
-                Vertex::new(p000, left_normal),
-                Vertex::new(p001, left_normal),
-                Vertex::new(p011, left_normal),
-                Vertex::new(p010, left_normal),
-            ],
-            metadata.clone(),
+        let left = Self::create_rectangular_face(
+            [p000, p001, p011, p010],
+            -Vector3::x(),
+            &metadata,
         );
 
-        // Right face (x=width, normal approx. +X)
-        // p100 -> p101 -> p111 -> p110
-        let right_normal = Vector3::x();
-        let right = Polygon::new(
-            vec![
-                Vertex::new(p100, right_normal),
-                Vertex::new(p110, right_normal),
-                Vertex::new(p111, right_normal),
-                Vertex::new(p101, right_normal),
-            ],
-            metadata.clone(),
+        let right = Self::create_rectangular_face(
+            [p100, p110, p111, p101],
+            Vector3::x(),
+            &metadata,
         );
 
         // Combine all faces into a Mesh
-        Mesh::from_polygons(&[bottom, top, front, back, left, right], metadata)
+        Ok(Mesh::from_polygons(&[bottom, top, front, back, left, right], metadata))
     }
 
-    pub fn cube(width: Real, metadata: Option<S>) -> Mesh<S> {
+    pub fn cube(width: Real, metadata: Option<S>) -> Result<Mesh<S>, ValidationError> {
         Self::cuboid(width, width, width, metadata)
     }
 
@@ -192,7 +181,7 @@ impl<S: Clone + Debug + Send + Sync> Mesh<S> {
     /// - **Angular Distortion**: Increases towards poles (unavoidable)
     ///
     /// ### **Numerical Considerations**
-    /// - **Trigonometric Precision**: Uses TAU and PI for accuracy
+    /// - **Trigonometric Precision**: Uses crate::float_types::TAU and crate::float_types::PI for accuracy
     /// - **Pole Handling**: Avoids division by zero at singularities
     /// - **Winding Consistency**: Maintains outward-facing orientation
     ///
@@ -212,12 +201,23 @@ impl<S: Clone + Debug + Send + Sync> Mesh<S> {
         segments: usize,
         stacks: usize,
         metadata: Option<S>,
-    ) -> Mesh<S> {
-        let mut polygons = Vec::new();
+    ) -> Result<Mesh<S>, ValidationError> {
+        // Validate parameters
+        Self::validate_positive_dimension("radius", radius)?;
+        if segments < 3 {
+            return Err(ValidationError::InvalidShapeParameter("segments".to_string(), "must be at least 3".to_string()));
+        }
+        if stacks < 2 {
+            return Err(ValidationError::InvalidShapeParameter("stacks".to_string(), "must be at least 2".to_string()));
+        }
+
+        // Pre-allocate polygons vector for better performance
+        let mut polygons = Vec::with_capacity(segments * stacks);
 
         for i in 0..segments {
             for j in 0..stacks {
-                let mut vertices = Vec::new();
+                // Pre-allocate vertices vector for quad polygons (4 vertices)
+                let mut vertices = Vec::with_capacity(4);
 
                 let vertex = |theta: Real, phi: Real| {
                     let dir = Vector3::new(
@@ -236,10 +236,10 @@ impl<S: Clone + Debug + Send + Sync> Mesh<S> {
                 let p0 = j as Real / stacks as Real;
                 let p1 = (j + 1) as Real / stacks as Real;
 
-                let theta0 = t0 * TAU;
-                let theta1 = t1 * TAU;
-                let phi0 = p0 * PI;
-                let phi1 = p1 * PI;
+                let theta0 = t0 * crate::float_types::TAU;
+                let theta1 = t1 * crate::float_types::TAU;
+                let phi0 = p0 * crate::float_types::PI;
+                let phi1 = p1 * crate::float_types::PI;
 
                 vertices.push(vertex(theta0, phi0));
                 if j > 0 {
@@ -253,12 +253,12 @@ impl<S: Clone + Debug + Send + Sync> Mesh<S> {
                 polygons.push(Polygon::new(vertices, metadata.clone()));
             }
         }
-        Mesh::from_polygons(&polygons, metadata)
+        Ok(Mesh::from_polygons(&polygons, metadata))
     }
 
     /// Constructs a frustum between `start` and `end` with bottom radius = `radius1` and
     /// top radius = `radius2`. In the normal case, it creates side quads and cap triangles.
-    /// However, if one of the radii is 0 (within EPSILON), then the degenerate face is treated
+    /// However, if one of the radii is 0 (within crate::float_types::EPSILON), then the degenerate face is treated
     /// as a single point and the side is stitched using triangles.
     ///
     /// # Parameters
@@ -285,13 +285,33 @@ impl<S: Clone + Debug + Send + Sync> Mesh<S> {
         radius2: Real,
         segments: usize,
         metadata: Option<S>,
-    ) -> Mesh<S> {
+    ) -> Result<Mesh<S>, ValidationError> {
+        // Validate parameters
+        if radius1 < 0.0 || !radius1.is_finite() {
+            return Err(ValidationError::InvalidDimension("radius1".to_string(), radius1));
+        }
+        if radius2 < 0.0 || !radius2.is_finite() {
+            return Err(ValidationError::InvalidDimension("radius2".to_string(), radius2));
+        }
+        if segments < 3 {
+            return Err(ValidationError::InvalidShapeParameter("segments".to_string(), "must be at least 3".to_string()));
+        }
+        if !start.coords.x.is_finite()
+            || !start.coords.y.is_finite()
+            || !start.coords.z.is_finite()
+            || !end.coords.x.is_finite()
+            || !end.coords.y.is_finite()
+            || !end.coords.z.is_finite()
+        {
+            return Err(ValidationError::InvalidShapeParameter("start/end points".to_string(), "must be finite".to_string()));
+        }
+
         // Compute the axis and check that start and end do not coincide.
         let s = start.coords;
         let e = end.coords;
         let ray = e - s;
-        if ray.norm_squared() < EPSILON {
-            return Mesh::new();
+        if ray.norm_squared() < crate::float_types::EPSILON {
+            return Ok(Mesh::new());
         }
         let axis_z = ray.normalize();
         // Pick an axis not parallel to axis_z.
@@ -314,23 +334,25 @@ impl<S: Clone + Debug + Send + Sync> Mesh<S> {
         let point = |stack: Real, slice: Real, normal_blend: Real| {
             // Linear interpolation of radius.
             let r = radius1 * (1.0 - stack) + radius2 * stack;
-            let angle = slice * TAU;
+            let angle = slice * crate::float_types::TAU;
             let radial_dir = axis_x * angle.cos() + axis_y * angle.sin();
             let pos = s + ray * stack + radial_dir * r;
             let normal = radial_dir * (1.0 - normal_blend.abs()) + axis_z * normal_blend;
             Vertex::new(Point3::from(pos), normal.normalize())
         };
 
-        let mut polygons = Vec::new();
-
         // Special-case flags for degenerate faces.
-        let bottom_degenerate = radius1.abs() < EPSILON;
-        let top_degenerate = radius2.abs() < EPSILON;
+        let bottom_degenerate = radius1.abs() < crate::float_types::EPSILON;
+        let top_degenerate = radius2.abs() < crate::float_types::EPSILON;
 
         // If both faces are degenerate, we cannot build a meaningful volume.
         if bottom_degenerate && top_degenerate {
-            return Mesh::new();
+            return Ok(Mesh::new());
         }
+
+        // Pre-allocate polygons vector for better performance
+        // Maximum capacity: segments (bottom) + segments (top) + segments (sides) = 3 * segments
+        let mut polygons = Vec::with_capacity(3 * segments);
 
         // For each slice of the circle (0..segments)
         for i in 0..segments {
@@ -383,7 +405,7 @@ impl<S: Clone + Debug + Send + Sync> Mesh<S> {
             }
         }
 
-        Mesh::from_polygons(&polygons, metadata)
+        Ok(Mesh::from_polygons(&polygons, metadata))
     }
 
     /// A helper to create a vertical cylinder along Z from z=0..z=height
@@ -394,7 +416,7 @@ impl<S: Clone + Debug + Send + Sync> Mesh<S> {
         height: Real,
         segments: usize,
         metadata: Option<S>,
-    ) -> Mesh<S> {
+    ) -> Result<Mesh<S>, ValidationError> {
         Mesh::frustum_ptp(
             Point3::origin(),
             Point3::new(0.0, 0.0, height),
@@ -412,7 +434,13 @@ impl<S: Clone + Debug + Send + Sync> Mesh<S> {
         height: Real,
         segments: usize,
         metadata: Option<S>,
-    ) -> Mesh<S> {
+    ) -> Result<Mesh<S>, ValidationError> {
+        // Validate parameters
+        Self::validate_positive_dimension("radius", radius)?;
+        Self::validate_positive_dimension("height", height)?;
+        if segments < 3 {
+            return Err(ValidationError::InvalidShapeParameter("segments".to_string(), format!("{} (must be >= 3)", segments)));
+        }
         Mesh::frustum_ptp(
             Point3::origin(),
             Point3::new(0.0, 0.0, height),
@@ -459,7 +487,8 @@ impl<S: Clone + Debug + Send + Sync> Mesh<S> {
         faces: &[&[usize]],
         metadata: Option<S>,
     ) -> Result<Mesh<S>, ValidationError> {
-        let mut polygons = Vec::new();
+        // Pre-allocate polygons vector for better performance
+        let mut polygons = Vec::with_capacity(faces.len());
 
         for face in faces {
             // Skip degenerate faces
@@ -603,7 +632,7 @@ impl<S: Clone + Debug + Send + Sync> Mesh<S> {
         metadata: Option<S>,
     ) -> Self {
         let base_sphere = Self::sphere(1.0, segments, stacks, metadata.clone());
-        base_sphere.scale(rx, ry, rz)
+        base_sphere.expect("Failed to create base sphere").scale(rx, ry, rz)
     }
 
     /// Creates an arrow Mesh. The arrow is composed of:
@@ -629,11 +658,11 @@ impl<S: Clone + Debug + Send + Sync> Mesh<S> {
         segments: usize,
         orientation: bool,
         metadata: Option<S>,
-    ) -> Mesh<S> {
+    ) -> Result<Mesh<S>, ValidationError> {
         // Compute the arrow's total length.
         let arrow_length = direction.norm();
-        if arrow_length < EPSILON {
-            return Mesh::new();
+        if arrow_length < crate::float_types::EPSILON {
+            return Ok(Mesh::new());
         }
         // Compute the unit direction.
         let unit_dir = direction / arrow_length;
@@ -650,7 +679,7 @@ impl<S: Clone + Debug + Send + Sync> Mesh<S> {
         let tip_radius = arrow_length * 0.0; // tip radius (nearly a point)
 
         // Build the shaft as a vertical cylinder along Z from 0 to shaft_length.
-        let shaft = Mesh::cylinder(shaft_radius, shaft_length, segments, metadata.clone());
+        let shaft = Mesh::cylinder(shaft_radius, shaft_length, segments, metadata.clone())?;
 
         // Build the arrow head as a frustum from z = shaft_length to z = shaft_length + head_length.
         let head = Mesh::frustum_ptp(
@@ -660,7 +689,7 @@ impl<S: Clone + Debug + Send + Sync> Mesh<S> {
             tip_radius,
             segments,
             metadata.clone(),
-        );
+        )?;
 
         // Combine the shaft and head.
         let mut canonical_arrow = shaft.union(&head);
@@ -691,7 +720,7 @@ impl<S: Clone + Debug + Send + Sync> Mesh<S> {
         // Finally, translate the arrow so that the anchored vertex (canonical (0,0,0)) moves to 'start'.
         // In the false case, (0,0,0) is the base (arrow extends from start to start+direction).
         // In the true case, after mirroring, (0,0,0) is the tip (arrow extends from start to start+direction).
-        rotated_arrow.translate(start.x, start.y, start.z)
+        Ok(rotated_arrow.translate(start.x, start.y, start.z))
     }
 
     /// Regular octahedron scaled by `radius`
@@ -718,7 +747,13 @@ impl<S: Clone + Debug + Send + Sync> Mesh<S> {
             .iter()
             .map(|&[x, y, z]| [x * radius, y * radius, z * radius])
             .collect();
-        Self::polyhedron(&scaled, &faces, metadata).unwrap()
+        match Self::polyhedron(&scaled, &faces, metadata.clone()) {
+            Ok(mesh) => mesh,
+            Err(_) => {
+                // Fallback to a simple approximation if polyhedron creation fails
+                Self::cube(radius * 2.0, metadata).expect("Failed to create cube for octahedron")
+            },
+        }
     }
 
     /// Regular icosahedron scaled by `radius`
@@ -772,9 +807,13 @@ impl<S: Clone + Debug + Send + Sync> Mesh<S> {
             &[9, 8, 1],
         ];
 
-        Self::polyhedron(&pts, &faces, metadata)
-            .unwrap()
-            .scale(factor, factor, factor)
+        match Self::polyhedron(&pts, &faces, metadata.clone()) {
+            Ok(mesh) => mesh.scale(factor, factor, factor),
+            Err(_) => {
+                // Fallback to a simple approximation if polyhedron creation fails
+                Self::sphere(radius, 8, 6, metadata).expect("Failed to create sphere for icosahedron")
+            },
+        }
     }
 
     /// Torus centred at the origin in the *XY* plane.

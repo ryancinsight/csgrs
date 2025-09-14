@@ -15,8 +15,6 @@ use crate::mesh::Polygon;
 #[cfg(feature = "parallel")]
 use crate::mesh::Vertex;
 
-#[cfg(feature = "parallel")]
-use crate::float_types::EPSILON;
 
 impl<S: Clone + Send + Sync + Debug> Node<S> {
     /// Invert all polygons in the BSP tree using iterative approach to avoid stack overflow
@@ -49,10 +47,9 @@ impl<S: Clone + Send + Sync + Debug> Node<S> {
     #[cfg(feature = "parallel")]
     pub fn clip_polygons(&self, polygons: &[Polygon<S>]) -> Vec<Polygon<S>> {
         // If this node has no plane, just return the original set
-        if self.plane.is_none() {
+        let Some(plane) = self.plane.as_ref() else {
             return polygons.to_vec();
-        }
-        let plane = self.plane.as_ref().unwrap();
+        };
 
         // Split each polygon in parallel; gather results
         let (coplanar_front, coplanar_back, mut front, mut back) = polygons
@@ -131,7 +128,10 @@ impl<S: Clone + Send + Sync + Debug> Node<S> {
         if self.plane.is_none() {
             self.plane = Some(self.pick_best_splitting_plane(polygons));
         }
-        let plane = self.plane.as_ref().unwrap();
+        let Some(plane) = self.plane.as_ref() else {
+            // This should never happen since we just set it above
+            return;
+        };
 
         // Split polygons in parallel
         let (mut coplanar_front, mut coplanar_back, front, back) =
@@ -212,7 +212,7 @@ impl<S: Clone + Send + Sync + Debug> Node<S> {
                                 // The param intersection at which plane intersects the edge [vi -> vj].
                                 // Avoid dividing by zero:
                                 let denom = slicing_plane.normal().dot(&(vj.pos - vi.pos));
-                                if denom.abs() > EPSILON {
+                                if denom.abs() > crate::float_types::EPSILON {
                                     let intersection = (slicing_plane.offset()
                                         - slicing_plane.normal().dot(&vi.pos.coords))
                                         / denom;

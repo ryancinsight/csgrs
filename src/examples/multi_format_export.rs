@@ -407,26 +407,33 @@ mod tests {
             let vertex_line = lines
                 .iter()
                 .find(|line| line.starts_with("element vertex"))
-                .unwrap();
+                .expect("PLY file should contain vertex element declaration");
             let face_line = lines
                 .iter()
                 .find(|line| line.starts_with("element face"))
-                .unwrap();
+                .expect("PLY file should contain face element declaration");
 
             let vertex_count: usize = vertex_line
                 .split_whitespace()
                 .nth(2)
-                .unwrap()
+                .expect("Vertex element line should have count field")
                 .parse()
-                .unwrap();
-            let face_count: usize =
-                face_line.split_whitespace().nth(2).unwrap().parse().unwrap();
+                .expect("Vertex count should be a valid integer");
+            let face_count: usize = face_line
+                .split_whitespace()
+                .nth(2)
+                .expect("Face element line should have count field")
+                .parse()
+                .expect("Face count should be a valid integer");
 
-            assert!(vertex_count > 0);
-            assert!(face_count > 0);
+            assert!(vertex_count > 0, "PLY file should contain at least one vertex");
+            assert!(face_count > 0, "PLY file should contain at least one face");
 
             // Check that data section contains the right number of items
-            let header_end = lines.iter().position(|line| *line == "end_header").unwrap();
+            let header_end = lines
+                .iter()
+                .position(|line| *line == "end_header")
+                .expect("PLY file should contain end_header marker");
             let data_lines = &lines[header_end + 1..];
 
             // Count vertex data lines (lines with 6 float values: x y z nx ny nz)

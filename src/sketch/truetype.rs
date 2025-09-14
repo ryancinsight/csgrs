@@ -271,8 +271,8 @@ impl OutlineFlattener {
             // If the last point != the first, close it.
             let first = self.current[0];
             let last = self.current[n - 1];
-            if (first.0 - last.0).abs() > Real::EPSILON
-                || (first.1 - last.1).abs() > Real::EPSILON
+            if (first.0 - last.0).abs() > crate::float_types::EPSILON
+                || (first.1 - last.1).abs() > crate::float_types::EPSILON
             {
                 self.current.push(first);
             }

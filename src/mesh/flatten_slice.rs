@@ -1,7 +1,7 @@
 //! Provides functions for flattening a `Mesh` against the Z=0 `Plane`
 //! or slicing a `Mesh` with an arbitrary `Plane` into a `Sketch`
 
-use crate::float_types::{EPSILON, Real};
+use crate::float_types::Real;
 use crate::mesh::Mesh;
 use crate::mesh::bsp::Node;
 use crate::mesh::plane::Plane;
@@ -88,7 +88,7 @@ impl<S: Clone + Debug + Send + Sync> Mesh<S> {
     /// use csgrs::mesh::plane::Plane;
     /// use csgrs::sketch::Sketch;
     /// use nalgebra::Vector3;
-    /// let cylinder = Mesh::<()>::cylinder(1.0, 2.0, 32, None);
+    /// let cylinder = Mesh::<()>::cylinder(1.0, 2.0, 32, None).expect("Failed to create cylinder");
     /// let plane_z0 = Plane::from_normal(Vector3::z(), 0.0);
     /// let cross_section = cylinder.slice(plane_z0);
     /// // `cross_section` will contain:
@@ -124,23 +124,46 @@ impl<S: Clone + Debug + Send + Sync> Mesh<S> {
                 continue;
             }
 
-            // check if first and last point are within EPSILON of each other
+            // check if first and last point are within crate::float_types::EPSILON of each other
             let dist_sq = (chain[0].pos - chain[n - 1].pos).norm_squared();
-            if dist_sq < EPSILON * EPSILON {
+            if dist_sq < crate::float_types::EPSILON * crate::float_types::EPSILON {
                 // Force them to be exactly the same, closing the line
                 chain[n - 1] = chain[0];
             }
 
-            let polyline = LineString::new(
-                chain
-                    .iter()
-                    .map(|vertex| {
-                        coord! {x: vertex.pos.x, y: vertex.pos.y}
-                    })
-                    .collect(),
-            );
+            let mut coords: Vec<_> = chain
+                .iter()
+                .map(|vertex| {
+                    coord! {x: vertex.pos.x, y: vertex.pos.y}
+                })
+                .collect();
 
-            if polyline.is_closed() {
+            // Ensure the coordinates are closed by checking if first and last are close
+            let is_closed = if coords.len() >= 2 {
+                let first = coords[0];
+                let last_idx = coords.len() - 1;
+                let last = coords[last_idx];
+
+                let dx = (first.x - last.x).abs();
+                let dy = (first.y - last.y).abs();
+
+                // If they're close enough, make them exactly equal
+                // Use a slightly larger tolerance for detecting closed loops in slicing
+                // to account for accumulated floating-point error in geometric calculations
+                let loop_tolerance = crate::float_types::EPSILON * 10.0; // 10x epsilon for loop detection
+                if dx < loop_tolerance && dy < loop_tolerance {
+                    coords[last_idx] = first;
+                    true
+                } else {
+                    false
+                }
+            } else {
+                false
+            };
+
+            let polyline = LineString::new(coords);
+
+            if is_closed {
                 let polygon = GeoPolygon::new(polyline, vec![]);
                 let oriented = polygon.orient(Direction::Default);
                 new_gc.0.push(Geometry::Polygon(oriented));
@@ -175,11 +198,11 @@ fn make_key(pos: &Point3<Real>) -> EndKey {
 
 /// Take a list of intersection edges `[Vertex;2]` and merge them into polylines.
 /// Each edge is a line segment between two 3D points.  We want to "knit" them together by
-/// matching endpoints that lie within EPSILON of each other, forming either open or closed chains.
+/// matching endpoints that lie within crate::float_types::EPSILON of each other, forming either open or closed chains.
 ///
 /// This returns a `Vec` of polylines, where each polyline is a `Vec<Vertex>`.
 fn unify_intersection_edges(edges: &[[Vertex; 2]]) -> Vec<Vec<Vertex>> {
-    // We will store adjacency by a "key" that identifies an endpoint up to EPSILON,
+    // We will store adjacency by a "key" that identifies an endpoint up to crate::float_types::EPSILON,
     // then link edges that share the same key.
 
     // Adjacency map: key -> list of (edge_index, is_start_or_end)
@@ -239,7 +262,9 @@ fn extend_chain_forward(
 ) {
     loop {
         // The chain's current end point:
-        let last_v = chain.last().unwrap();
+        let Some(last_v) = chain.last() else {
+            break; // Empty chain
+        };
         let key = make_key(&last_v.pos);
 
         // Find candidate edges that share this endpoint
@@ -260,7 +285,7 @@ fn extend_chain_forward(
             let next_vertex = &edges[edge_idx][other_end_idx];
 
             // But we must also confirm that the last_v is indeed edges[edge_idx][end_idx]
-            // (within EPSILON) which we have checked via the key, so likely yes.
+            // (within crate::float_types::EPSILON) which we have checked via the key, so likely yes.
 
             // Mark visited
             visited[edge_idx] = true;
