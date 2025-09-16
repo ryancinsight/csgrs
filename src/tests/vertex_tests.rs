@@ -94,7 +94,7 @@ fn test_vertex_distance_operations() {
 
 #[test]
 fn test_vertex_clustering() {
-    let vertices = vec![
+    let vertices = [
         Vertex::new(Point3::new(0.0, 0.0, 0.0), Vector3::x()),
         Vertex::new(Point3::new(0.001, 0.0, 0.0), Vector3::x()), // Close to first
         Vertex::new(Point3::new(1.0, 0.0, 0.0), Vector3::x()),   // Far from first

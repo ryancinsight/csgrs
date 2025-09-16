@@ -11,7 +11,6 @@ use geo::{CoordsIter, Geometry, Polygon as GeoPolygon};
 use nalgebra::{Matrix4, Point3, Vector3, partial_max, partial_min};
 use std::{cmp::PartialEq, fmt::Debug, sync::OnceLock};
 
-
 pub mod bsp;
 pub mod bsp_parallel;
 
@@ -166,9 +165,8 @@ impl<S: Clone + Send + Sync + Debug> CSG for Mesh<S> {
         let b_clip_retagged: Vec<Polygon<S>> = b_clip
             .iter()
             .map(|poly| {
-                let mut p = poly.clone();
-                p.metadata = self.metadata.clone();
-                p
+                // Avoid full polygon clone by creating new polygon with same geometry but different metadata
+                Polygon::new(poly.vertices.clone(), self.metadata.clone())
             })
             .collect();
 
@@ -387,11 +385,22 @@ impl<S: Clone + Send + Sync + Debug> CSG for Mesh<S> {
 
     /// Invert this Mesh (flip inside vs. outside)
     fn inverse(&self) -> Mesh<S> {
-        let mut mesh = self.clone();
-        for p in &mut mesh.polygons {
-            p.flip();
+        // Create new mesh with flipped polygons to avoid full mesh clone
+        let flipped_polygons = self
+            .polygons
+            .iter()
+            .map(|poly| {
+                let mut flipped = poly.clone();
+                flipped.flip();
+                flipped
+            })
+            .collect();
+
+        Mesh {
+            polygons: flipped_polygons,
+            bounding_box: OnceLock::new(), // Invalidate cached bounding box
+            metadata: self.metadata.clone(),
         }
-        mesh
     }
 }
 

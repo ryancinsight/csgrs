@@ -56,7 +56,7 @@ pub trait CSG: Sized + Clone {
         self.translate(0.0, 0.0, -min_z)
     }
 
-    /// Rotates Self by x_degrees, y_degrees, z_degrees
+    /// Rotates Self by `x_deg` degrees, `y_deg` degrees, `z_deg` degrees
     fn rotate(&self, x_deg: Real, y_deg: Real, z_deg: Real) -> Self {
         let rx = Rotation3::from_axis_angle(&Vector3::x_axis(), x_deg.to_radians());
         let ry = Rotation3::from_axis_angle(&Vector3::y_axis(), y_deg.to_radians());
@@ -67,7 +67,7 @@ pub trait CSG: Sized + Clone {
         self.transform(&rot.to_homogeneous())
     }
 
-    /// Scales Self by scale_x, scale_y, scale_z
+    /// Scales Self by `scale_x`, `scale_y`, `scale_z`
     fn scale(&self, sx: Real, sy: Real, sz: Real) -> Self {
         let mat4 = Matrix4::new_nonuniform_scaling(&Vector3::new(sx, sy, sz));
         self.transform(&mat4)
@@ -113,7 +113,7 @@ pub trait CSG: Sized + Clone {
     /// - **Involution**: M² = I (reflecting twice gives identity)
     /// - **Plane Invariance**: Points on the plane remain fixed
     ///
-    /// **Note**: The result is inverted (.inverse()) because reflection reverses
+    /// **Note**: The result is inverted (`.inverse()`) because reflection reverses
     /// the orientation of polygons, affecting inside/outside semantics in CSG.
     ///
     /// Returns a new Self whose geometry is mirrored accordingly.
@@ -167,7 +167,7 @@ pub trait CSG: Sized + Clone {
     /// - **Arc Length**: Uniform angular spacing, not linear spacing
     /// - **Coordinate System**: XY-plane rotation around Z-axis
     /// - **Radius Preservation**: All copies lie on circle of given radius
-    /// - **Angle Range**: [start_angle_deg, end_angle_deg] in degrees
+    /// - **Angle Range**: [`start_angle_deg`, `end_angle_deg`] in degrees
     /// - **Interpolation**: Linear in angle, resulting in uniform angular spacing
     ///
     /// ## **Performance Characteristics**
@@ -200,7 +200,7 @@ pub trait CSG: Sized + Clone {
             let t = if count == 1 {
                 0.5
             } else {
-                i as Real / ((count - 1) as Real)
+                (i as Real) / ((count.saturating_sub(1).max(1)) as Real)
             };
 
             let angle = start_rad + t * sweep;
@@ -238,7 +238,7 @@ pub trait CSG: Sized + Clone {
     /// ## **Algorithm Overview**
     /// 1. **Vector Normalization**: Ensure direction vector has unit length
     /// 2. **Step Calculation**: Compute displacement vector for each step
-    /// 3. **Linear Interpolation**: Position = origin + i × step_vector
+    /// 3. **Linear Interpolation**: Position = origin + i × `step_vector`
     /// 4. **Batch Processing**: Collect all transformations before union
     ///
     /// ## **Mathematical Properties**

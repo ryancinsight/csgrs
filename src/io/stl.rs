@@ -476,17 +476,27 @@ pub mod indexed_mesh_stl {
                 }
 
                 // Calculate face normal using Newell's method
-                let normal = if let Some(computed_normal) = self.compute_face_normal(&face.vertices) {
-                    computed_normal
-                } else {
-                    // Fallback to first triangle normal
-                    let v0 = &self.vertices[face.vertices[0]];
-                    let v1 = &self.vertices[face.vertices[1]];
-                    let v2 = &self.vertices[face.vertices[2]];
-                    let edge1 = v1.pos - v0.pos;
-                    let edge2 = v2.pos - v0.pos;
-                    edge1.cross(&edge2).normalize()
-                };
+                let normal =
+                    if let Some(computed_normal) = self.compute_face_normal(&face.vertices) {
+                        computed_normal
+                    } else {
+                        // Fallback to first triangle normal with proper validation
+                        let v0 = &self.vertices[face.vertices[0]];
+                        let v1 = &self.vertices[face.vertices[1]];
+                        let v2 = &self.vertices[face.vertices[2]];
+                        let edge1 = v1.pos - v0.pos;
+                        let edge2 = v2.pos - v0.pos;
+                        let cross_product = edge1.cross(&edge2);
+
+                        // Check if cross product is valid (non-zero magnitude)
+                        let cross_norm = cross_product.norm();
+                        if cross_norm > 1e-10 {
+                            cross_product / cross_norm
+                        } else {
+                            // Ultimate fallback: use default upward normal
+                            Vector3::new(0.0, 0.0, 1.0)
+                        }
+                    };
 
                 // Handle triangular faces directly
                 if face.vertices.len() == 3 {

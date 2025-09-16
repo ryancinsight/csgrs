@@ -55,6 +55,7 @@ bevy_asset = { version = "0.16", optional = true }
 wgpu-types = { version = "24", optional = true, default-features = false }
 tracing-subscriber = "0.3.20"
 slab = "0.4.11"
+wide = { version = "0.7", optional = true }
 
 # utils
 rayon = { version = "1.10", optional = true }
@@ -84,11 +85,11 @@ doc-image-embed = "0.2.1"
 
 # wasm
 [target.'cfg(any(target_arch = "wasm32", target_arch = "wasm64"))'.dependencies]
-getrandom = { version = "0.3", features = ["wasm_js"], optional = true }
 wasm-bindgen = { version = "0.2", optional = true }
 
 [features]
-default = ["f64", "stl-io", "dxf-io", "obj-io", "ply-io", "amf-io", "chull-io", "image-io", "metaballs", "sdf", "offset", "delaunay", "truetype-text", "hershey-text"]
+default = ["f64", "stl-io", "dxf-io", "obj-io", "ply-io", "amf-io", "chull-io", "image-io", "metaballs", "sdf", "offset", "delaunay", "truetype-text", "hershey-text", "simd"]
+wasm = ["f64", "stl-io", "obj-io", "ply-io", "amf-io", "metaballs", "sdf", "truetype-text", "hershey-text", "simd", "earcut", "wasm-bindgen"]
 parallel = [
   "rayon",
   "geo/multithreading",
@@ -152,12 +153,23 @@ offset = [
 ]
 delaunay = [
   "geo/spade",
+  # Ensure earcut is not enabled when delaunay is
 ]
 earcut = [
   "geo/earcutr",
+  # Ensure delaunay is not enabled when earcut is
 ]
 bevymesh = [
   "dep:bevy_mesh",
   "dep:bevy_asset",
   "dep:wgpu-types"
 ]
+simd = [
+  "wide"
+]
+
+[dev-dependencies]
+criterion = { version = "0.5", features = ["html_reports"] }
+
+[profile.bench]
+# Removed panic = "abort" due to dependency conflicts

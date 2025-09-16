@@ -173,8 +173,8 @@ impl<S: Clone + Debug + Send + Sync> Sketch<S> {
     ///
     /// ## **Input Processing**
     /// For each Geometry in the collection:
-    /// - **Polygon**: Buffer and convert to MultiPolygon
-    /// - **MultiPolygon**: Buffer directly preserving holes
+    /// - **Polygon**: Buffer and convert to `MultiPolygon`
+    /// - **`MultiPolygon`**: Buffer directly preserving holes
     /// - **Other geometries**: Excluded from processing
     ///
     /// ## **Mathematical Properties**
@@ -185,6 +185,7 @@ impl<S: Clone + Debug + Send + Sync> Sketch<S> {
     ///
     /// **Note**: Sharp corners may create very acute angles for large offset distances.
     #[allow(clippy::unnecessary_cast)]
+    #[must_use]
     pub fn offset(&self, distance: Real) -> Sketch<S> {
         let offset_geoms = self
             .geometry
@@ -264,10 +265,11 @@ impl<S: Clone + Debug + Send + Sync> Sketch<S> {
     ///
     /// Uses rounded corners for each convex vertex.
     /// For each Geometry in the collection:
-    /// - **Polygon**: Buffer and convert to MultiPolygon  
-    /// - **MultiPolygon**: Buffer directly preserving holes
+    /// - **Polygon**: Buffer and convert to `MultiPolygon`
+    /// - **`MultiPolygon`**: Buffer directly preserving holes
     /// - **Other geometries**: Excluded from processing
     #[allow(clippy::unnecessary_cast)]
+    #[must_use]
     pub fn offset_rounded(&self, distance: Real) -> Sketch<S> {
         let offset_geoms = self
             .geometry
@@ -311,6 +313,7 @@ impl<S: Clone + Debug + Send + Sync> Sketch<S> {
     /// + `orientation`: determines the region where the straight skeleton created. The value of this `boolean` variable will be:
     ///     * `true` to create the straight skeleton on the inward region of the polygon, and,
     ///     * `false` to create on the outward region of the polygon.
+    #[must_use]
     pub fn straight_skeleton(&self, orientation: bool) -> Sketch<S> {
         let skeleton = self
             .geometry

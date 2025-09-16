@@ -100,7 +100,9 @@ pub fn run_centering_demo() -> Result<(), Box<dyn std::error::Error>> {
     fs::create_dir_all("stl")?;
 
     // Create an off-center shape
-    let off_center_cube = MeshType::cube(2.0, None).expect("Failed to create cube").translate(5.0, 3.0, 1.0);
+    let off_center_cube = MeshType::cube(2.0, None)
+        .expect("Failed to create cube")
+        .translate(5.0, 3.0, 1.0);
 
     #[cfg(feature = "stl-io")]
     {
@@ -116,7 +118,9 @@ pub fn run_centering_demo() -> Result<(), Box<dyn std::error::Error>> {
         println!("✓ Created cube_centered.stl");
 
         // Float to Z=0
-        let sphere_low = MeshType::sphere(1.0, 16, 8, None).expect("Failed to create sphere").translate(0.0, 0.0, -2.0);
+        let sphere_low = MeshType::sphere(1.0, 16, 8, None)
+            .expect("Failed to create sphere")
+            .translate(0.0, 0.0, -2.0);
         let floated = sphere_low.float();
         let stl_data = floated.to_stl_binary("sphere_floated")?;
         fs::write("stl/sphere_floated.stl", stl_data)?;

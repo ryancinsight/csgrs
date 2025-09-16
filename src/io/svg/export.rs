@@ -10,7 +10,6 @@ use svg::node::element::path;
 
 /// Convert Sketch to SVG string representation
 pub fn sketch_to_svg<S>(sketch: &Sketch<S>) -> String {
-
     let mut g = element::Group::new();
 
     let make_line_string = |line_string: &geo::LineString<f64>| {
@@ -72,45 +71,45 @@ pub fn sketch_to_svg<S>(sketch: &Sketch<S>) -> String {
                     match sub_geom {
                         Polygon(p) => {
                             g = g.add(make_polygon(p));
-                        }
+                        },
                         LineString(ls) => {
                             g = g.add(make_line_string(ls));
-                        }
+                        },
                         MultiPolygon(mp) => {
                             for p in &mp.0 {
                                 g = g.add(make_polygon(p));
                             }
-                        }
+                        },
                         MultiLineString(mls) => {
                             for ls in &mls.0 {
                                 g = g.add(make_line_string(ls));
                             }
-                        }
+                        },
                         _ => {
                             // Skip unsupported geometry types for now
-                        }
+                        },
                     }
                 }
-            }
+            },
             Polygon(p) => {
                 g = g.add(make_polygon(p));
-            }
+            },
             LineString(ls) => {
                 g = g.add(make_line_string(ls));
-            }
+            },
             MultiPolygon(mp) => {
                 for p in &mp.0 {
                     g = g.add(make_polygon(p));
                 }
-            }
+            },
             MultiLineString(mls) => {
                 for ls in &mls.0 {
                     g = g.add(make_line_string(ls));
                 }
-            }
+            },
             _ => {
                 // Skip unsupported geometry types for now
-            }
+            },
         }
     }
 

@@ -17,8 +17,9 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     if args.len() == 1 {
         println!("CSGRS Examples Runner");
         println!(
-            "Usage: {} [all|basic|advanced|shapes|transform|boolean|extrude]",
-            args[0]
+            "Usage: {} [all|basic|advanced|shapes|transform|boolean|extrude|indexed{}]",
+            args[0],
+            if cfg!(feature = "wasm-bindgen") { "|wasm" } else { "" }
         );
         println!("Running all examples by default...\n");
         return examples::run_all_examples();
@@ -47,11 +48,15 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             csgrs::examples::advanced_features::run_extrusion_demo()?;
             csgrs::examples::advanced_features::run_2d_boolean_demo()
         },
+        "indexed" => examples::run_indexed_mesh_examples(),
+        #[cfg(feature = "wasm-bindgen")]
+        "wasm" => csgrs::examples::wasm_example::run_wasm_demo(),
         _ => {
             eprintln!("Unknown argument: {}", args[1]);
             eprintln!(
-                "Usage: {} [all|basic|advanced|shapes|transform|boolean|extrude]",
-                args[0]
+                "Usage: {} [all|basic|advanced|shapes|transform|boolean|extrude|indexed{}]",
+                args[0],
+                if cfg!(feature = "wasm-bindgen") { "|wasm" } else { "" }
             );
             std::process::exit(1);
         },

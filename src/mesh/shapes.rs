@@ -75,7 +75,12 @@ impl<S: Clone + Debug + Send + Sync> Mesh<S> {
     /// - **Surface Area**: A = 2(wl + wh + lh)
     /// - **Diagonal**: d = √(w² + l² + h²)
     /// - **Centroid**: (w/2, l/2, h/2)
-    pub fn cuboid(width: Real, length: Real, height: Real, metadata: Option<S>) -> Result<Mesh<S>, ValidationError> {
+    pub fn cuboid(
+        width: Real,
+        length: Real,
+        height: Real,
+        metadata: Option<S>,
+    ) -> Result<Mesh<S>, ValidationError> {
         // Validate dimensions are positive and finite
         Self::validate_positive_dimension("width", width)?;
         Self::validate_positive_dimension("length", length)?;
@@ -97,44 +102,29 @@ impl<S: Clone + Debug + Send + Sync> Mesh<S> {
         // and consistent (counter-clockwise) vertex winding as viewed from outside the prism.
 
         // Create faces using helper function for consistency and reduced duplication
-        let bottom = Self::create_rectangular_face(
-            [p000, p010, p110, p100],
-            -Vector3::z(),
-            &metadata,
-        );
+        let bottom =
+            Self::create_rectangular_face([p000, p010, p110, p100], -Vector3::z(), &metadata);
 
-        let top = Self::create_rectangular_face(
-            [p001, p101, p111, p011],
-            Vector3::z(),
-            &metadata,
-        );
+        let top =
+            Self::create_rectangular_face([p001, p101, p111, p011], Vector3::z(), &metadata);
 
-        let front = Self::create_rectangular_face(
-            [p000, p100, p101, p001],
-            -Vector3::y(),
-            &metadata,
-        );
+        let front =
+            Self::create_rectangular_face([p000, p100, p101, p001], -Vector3::y(), &metadata);
 
-        let back = Self::create_rectangular_face(
-            [p010, p011, p111, p110],
-            Vector3::y(),
-            &metadata,
-        );
+        let back =
+            Self::create_rectangular_face([p010, p011, p111, p110], Vector3::y(), &metadata);
 
-        let left = Self::create_rectangular_face(
-            [p000, p001, p011, p010],
-            -Vector3::x(),
-            &metadata,
-        );
+        let left =
+            Self::create_rectangular_face([p000, p001, p011, p010], -Vector3::x(), &metadata);
 
-        let right = Self::create_rectangular_face(
-            [p100, p110, p111, p101],
-            Vector3::x(),
-            &metadata,
-        );
+        let right =
+            Self::create_rectangular_face([p100, p110, p111, p101], Vector3::x(), &metadata);
 
         // Combine all faces into a Mesh
-        Ok(Mesh::from_polygons(&[bottom, top, front, back, left, right], metadata))
+        Ok(Mesh::from_polygons(
+            &[bottom, top, front, back, left, right],
+            metadata,
+        ))
     }
 
     pub fn cube(width: Real, metadata: Option<S>) -> Result<Mesh<S>, ValidationError> {
@@ -205,10 +195,16 @@ impl<S: Clone + Debug + Send + Sync> Mesh<S> {
         // Validate parameters
         Self::validate_positive_dimension("radius", radius)?;
         if segments < 3 {
-            return Err(ValidationError::InvalidShapeParameter("segments".to_string(), "must be at least 3".to_string()));
+            return Err(ValidationError::InvalidShapeParameter(
+                "segments".to_string(),
+                "must be at least 3".to_string(),
+            ));
         }
         if stacks < 2 {
-            return Err(ValidationError::InvalidShapeParameter("stacks".to_string(), "must be at least 2".to_string()));
+            return Err(ValidationError::InvalidShapeParameter(
+                "stacks".to_string(),
+                "must be at least 2".to_string(),
+            ));
         }
 
         // Pre-allocate polygons vector for better performance
@@ -288,13 +284,22 @@ impl<S: Clone + Debug + Send + Sync> Mesh<S> {
     ) -> Result<Mesh<S>, ValidationError> {
         // Validate parameters
         if radius1 < 0.0 || !radius1.is_finite() {
-            return Err(ValidationError::InvalidDimension("radius1".to_string(), radius1));
+            return Err(ValidationError::InvalidDimension(
+                "radius1".to_string(),
+                radius1,
+            ));
         }
         if radius2 < 0.0 || !radius2.is_finite() {
-            return Err(ValidationError::InvalidDimension("radius2".to_string(), radius2));
+            return Err(ValidationError::InvalidDimension(
+                "radius2".to_string(),
+                radius2,
+            ));
         }
         if segments < 3 {
-            return Err(ValidationError::InvalidShapeParameter("segments".to_string(), "must be at least 3".to_string()));
+            return Err(ValidationError::InvalidShapeParameter(
+                "segments".to_string(),
+                "must be at least 3".to_string(),
+            ));
         }
         if !start.coords.x.is_finite()
             || !start.coords.y.is_finite()
@@ -303,7 +308,10 @@ impl<S: Clone + Debug + Send + Sync> Mesh<S> {
             || !end.coords.y.is_finite()
             || !end.coords.z.is_finite()
         {
-            return Err(ValidationError::InvalidShapeParameter("start/end points".to_string(), "must be finite".to_string()));
+            return Err(ValidationError::InvalidShapeParameter(
+                "start/end points".to_string(),
+                "must be finite".to_string(),
+            ));
         }
 
         // Compute the axis and check that start and end do not coincide.
@@ -439,7 +447,10 @@ impl<S: Clone + Debug + Send + Sync> Mesh<S> {
         Self::validate_positive_dimension("radius", radius)?;
         Self::validate_positive_dimension("height", height)?;
         if segments < 3 {
-            return Err(ValidationError::InvalidShapeParameter("segments".to_string(), format!("{} (must be >= 3)", segments)));
+            return Err(ValidationError::InvalidShapeParameter(
+                "segments".to_string(),
+                format!("{} (must be >= 3)", segments),
+            ));
         }
         Mesh::frustum_ptp(
             Point3::origin(),
@@ -632,7 +643,9 @@ impl<S: Clone + Debug + Send + Sync> Mesh<S> {
         metadata: Option<S>,
     ) -> Self {
         let base_sphere = Self::sphere(1.0, segments, stacks, metadata.clone());
-        base_sphere.expect("Failed to create base sphere").scale(rx, ry, rz)
+        base_sphere
+            .expect("Failed to create base sphere")
+            .scale(rx, ry, rz)
     }
 
     /// Creates an arrow Mesh. The arrow is composed of:
@@ -751,7 +764,8 @@ impl<S: Clone + Debug + Send + Sync> Mesh<S> {
             Ok(mesh) => mesh,
             Err(_) => {
                 // Fallback to a simple approximation if polyhedron creation fails
-                Self::cube(radius * 2.0, metadata).expect("Failed to create cube for octahedron")
+                Self::cube(radius * 2.0, metadata)
+                    .expect("Failed to create cube for octahedron")
             },
         }
     }
@@ -811,7 +825,8 @@ impl<S: Clone + Debug + Send + Sync> Mesh<S> {
             Ok(mesh) => mesh.scale(factor, factor, factor),
             Err(_) => {
                 // Fallback to a simple approximation if polyhedron creation fails
-                Self::sphere(radius, 8, 6, metadata).expect("Failed to create sphere for icosahedron")
+                Self::sphere(radius, 8, 6, metadata)
+                    .expect("Failed to create sphere for icosahedron")
             },
         }
     }

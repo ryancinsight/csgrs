@@ -23,7 +23,6 @@ pub mod hershey;
 #[cfg(feature = "image-io")]
 pub mod image;
 
-
 #[cfg(feature = "metaballs")]
 pub mod metaballs;
 
@@ -70,6 +69,7 @@ impl<S: Clone + Send + Sync + Debug> Sketch<S> {
     }
 
     /// Triangulate this polygon into a list of triangles, each triangle is [v0, v1, v2].
+    #[must_use]
     pub fn triangulate_2d(
         outer: &[[Real; 2]],
         holes: &[&[[Real; 2]]],
@@ -91,7 +91,7 @@ impl<S: Clone + Send + Sync + Debug> Sketch<S> {
         // Ear-cut triangulation on the polygon (outer + holes)
         let polygon = GeoPolygon::new(LineString::new(outer_coords), holes_coords);
 
-        #[cfg(feature = "earcut")]
+        #[cfg(all(feature = "earcut", not(feature = "delaunay")))]
         {
             use geo::TriangulateEarcut;
             let triangulation = polygon.earcut_triangles_raw();
@@ -135,10 +135,18 @@ impl<S: Clone + Send + Sync + Debug> Sketch<S> {
             }
             result
         }
+
+        #[cfg(not(any(feature = "delaunay", feature = "earcut")))]
+        {
+            // Fallback when neither triangulation feature is enabled
+            // This should return an empty result as triangulation is not available
+            Vec::new()
+        }
     }
 
     /// Return a copy of this `Sketch` whose polygons are normalised so that
     /// exterior rings wind counter-clockwise and interior rings clockwise.
+    #[must_use]
     pub fn renormalize(&self) -> Sketch<S> {
         // Re-build the collection, orienting only what’s supported.
         let oriented_geoms: Vec<Geometry<Real>> = self

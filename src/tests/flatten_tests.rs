@@ -14,7 +14,7 @@ fn test_flatten_cube() {
     let flattened = cube.flatten();
 
     // Flattened result should be a 2D sketch
-    assert!(flattened.geometry.len() > 0);
+    assert!(!flattened.geometry.is_empty());
 }
 
 #[test]
@@ -23,7 +23,7 @@ fn test_flatten_and_union_single_polygon() {
     let extruded = square.extrude(1.0);
     let flattened = extruded.flatten();
 
-    assert!(flattened.geometry.len() > 0);
+    assert!(!flattened.geometry.is_empty());
 }
 
 #[test]
@@ -37,7 +37,7 @@ fn test_flatten_and_union_two_disjoint_squares() {
     let union = extruded1.union(&extruded2);
     let flattened = union.flatten();
 
-    assert!(flattened.geometry.len() > 0);
+    assert!(!flattened.geometry.is_empty());
 }
 
 #[test]
@@ -51,7 +51,7 @@ fn test_flatten_and_union_two_overlapping_squares() {
     let union = extruded1.union(&extruded2);
     let flattened = union.flatten();
 
-    assert!(flattened.geometry.len() > 0);
+    assert!(!flattened.geometry.is_empty());
 }
 
 #[test]
@@ -60,7 +60,7 @@ fn test_flatten_and_union_near_xy_plane() {
     let extruded = square.extrude(1.0).translate(0.0, 0.0, 0.5); // Slightly above XY plane
 
     let flattened = extruded.flatten();
-    assert!(flattened.geometry.len() > 0);
+    assert!(!flattened.geometry.is_empty());
 }
 
 #[test]
@@ -74,7 +74,7 @@ fn test_flatten_and_union_collinear_edges() {
     let union = extruded1.union(&extruded2);
     let flattened = union.flatten();
 
-    assert!(flattened.geometry.len() > 0);
+    assert!(!flattened.geometry.is_empty());
 }
 
 #[test]
@@ -89,5 +89,5 @@ fn test_flatten_and_union_debug() {
     let flattened = union.flatten();
 
     // Should handle complex unions without issues
-    assert!(flattened.geometry.len() > 0);
+    assert!(!flattened.geometry.is_empty());
 }

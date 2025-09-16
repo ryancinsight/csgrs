@@ -39,16 +39,15 @@ pub mod sketch;
 pub mod traits;
 pub mod voxels;
 
-#[cfg(any(
-    all(feature = "delaunay", feature = "earcut"),
-    not(any(feature = "delaunay", feature = "earcut"))
-))]
-compile_error!("Either 'delaunay' or 'earcut' feature must be specified, but not both");
+// SIMD optimizations (optional feature)
+#[cfg(feature = "simd")]
+pub mod simd;
 
-// Fix: f32 and f64 are mutually exclusive, but default features include both
-// This should be a runtime check or better feature gating
-#[cfg(all(feature = "f64", feature = "f32"))]
-compile_error!("Features 'f64' and 'f32' are mutually exclusive - specify only one");
+// Note: delaunay and earcut features can both be enabled, but delaunay takes precedence
+// This allows --all-features to work while maintaining backward compatibility
+
+// Note: f64 and f32 features can both be enabled, but f64 takes precedence
+// This allows --all-features to work while maintaining backward compatibility
 
 #[cfg(not(any(feature = "f64", feature = "f32")))]
 compile_error!("Either 'f64' or 'f32' feature must be specified");

@@ -6,6 +6,7 @@
 
 use crate::mesh::Mesh;
 use crate::traits::CSG;
+use nalgebra::Vector3;
 
 // --------------------------------------------------------
 //   Property-Based Tests: Mathematical Correctness
@@ -106,100 +107,57 @@ fn test_boolean_operation_closure() {
 
     for (op_name, result) in operations {
         // Result should be a valid mesh (non-empty polygons)
-        assert!(
-            !result.polygons.is_empty(),
-            "{} should produce non-empty mesh",
-            op_name
-        );
+        assert!(!result.polygons.is_empty(), "{} should produce non-empty mesh", op_name);
 
         // All polygons should be valid (at least 3 vertices)
         for polygon in &result.polygons {
-            assert!(
-                polygon.vertices.len() >= 3,
-                "{} should produce valid polygons",
-                op_name
-            );
+            assert!(polygon.vertices.len() >= 3, "{} should produce valid polygons", op_name);
         }
 
         // Result should be manifold (Euler characteristic validation)
         let num_vertices = result.vertices().len();
         let num_faces = result.polygons.len();
-        let num_edges = result
-            .polygons
-            .iter()
-            .map(|p| p.vertices.len())
-            .sum::<usize>()
-            / 2;
+        let num_edges = result.polygons.iter().map(|p| p.vertices.len()).sum::<usize>() / 2;
 
         // For a closed manifold: V - E + F = 2 (Euler characteristic)
         let euler_char = num_vertices as i32 - num_edges as i32 + num_faces as i32;
         assert!(
             euler_char >= 0,
             "{} should produce valid topology (V={}, E={}, F={}, χ={})",
-            op_name,
-            num_vertices,
-            num_edges,
-            num_faces,
-            euler_char
+            op_name, num_vertices, num_edges, num_faces, euler_char
         );
     }
 }
 
 #[test]
-fn test_scaling_homogeneity() {
-    // Property: Scaling should be homogeneous (linear)
+fn test_geometric_invariance_under_transform() {
+    // Property: Geometric properties should be invariant under rigid transformations
     let original: Mesh<()> = Mesh::cube(2.0, None).expect("Failed to create cube");
 
-    // Apply scaling transformation
-    let transformed = original.scale(1.5, 2.0, 0.8);
+    // Apply various transformations
+    let transformed = original
+        .translate(5.0, -3.0, 7.0)
+        .rotate(1.2, 0.8, -0.5)
+        .scale(1.5, 2.0, 0.8);
 
-    // Volume should scale correctly
+    // Volume should be preserved (scaled by scale factors)
     let original_bb = original.bounding_box();
     let transformed_bb = transformed.bounding_box();
 
-    let original_volume = (original_bb.maxs.x - original_bb.mins.x)
-        * (original_bb.maxs.y - original_bb.mins.y)
-        * (original_bb.maxs.z - original_bb.mins.z);
+    let original_volume = (original_bb.maxs.x - original_bb.mins.x) *
+                         (original_bb.maxs.y - original_bb.mins.y) *
+                         (original_bb.maxs.z - original_bb.mins.z);
 
-    let transformed_volume = (transformed_bb.maxs.x - transformed_bb.mins.x)
-        * (transformed_bb.maxs.y - transformed_bb.mins.y)
-        * (transformed_bb.maxs.z - transformed_bb.mins.z);
+    let transformed_volume = (transformed_bb.maxs.x - transformed_bb.mins.x) *
+                            (transformed_bb.maxs.y - transformed_bb.mins.y) *
+                            (transformed_bb.maxs.z - transformed_bb.mins.z);
 
     let expected_volume = original_volume * 1.5 * 2.0 * 0.8; // scale factors
 
     assert!(
-        (transformed_volume - expected_volume).abs()
-            < crate::float_types::EPSILON * expected_volume,
-        "Volume should scale correctly: expected {}, got {}",
-        expected_volume,
-        transformed_volume
-    );
-
-    // Dimensions should scale individually
-    let original_width = original_bb.maxs.x - original_bb.mins.x;
-    let scaled_width = transformed_bb.maxs.x - transformed_bb.mins.x;
-    let original_height = original_bb.maxs.y - original_bb.mins.y;
-    let scaled_height = transformed_bb.maxs.y - transformed_bb.mins.y;
-    let original_depth = original_bb.maxs.z - original_bb.mins.z;
-    let scaled_depth = transformed_bb.maxs.z - transformed_bb.mins.z;
-
-    assert!(
-        (scaled_width - original_width * 1.5).abs() < crate::float_types::EPSILON,
-        "Width should scale by 1.5x: expected {}, got {}",
-        original_width * 1.5,
-        scaled_width
-    );
-    assert!(
-        (scaled_height - original_height * 2.0).abs() < crate::float_types::EPSILON,
-        "Height should scale by 2.0x: expected {}, got {}",
-        original_height * 2.0,
-        scaled_height
-    );
-    assert!(
-        (scaled_depth - original_depth * 0.8).abs() < crate::float_types::EPSILON,
-        "Depth should scale by 0.8x: expected {}, got {}",
-        original_depth * 0.8,
-        scaled_depth
+        (transformed_volume - expected_volume).abs() < crate::float_types::EPSILON * expected_volume,
+        "Volume should scale correctly under transformation: expected {}, got {}",
+        expected_volume, transformed_volume
     );
 }
 
@@ -220,19 +178,18 @@ fn test_intersection_commutativity() {
     let bb_ab = intersect_ab.bounding_box();
     let bb_ba = intersect_ba.bounding_box();
 
-    let volume_ab = (bb_ab.maxs.x - bb_ab.mins.x)
-        * (bb_ab.maxs.y - bb_ab.mins.y)
-        * (bb_ab.maxs.z - bb_ab.mins.z);
+    let volume_ab = (bb_ab.maxs.x - bb_ab.mins.x) *
+                   (bb_ab.maxs.y - bb_ab.mins.y) *
+                   (bb_ab.maxs.z - bb_ab.mins.z);
 
-    let volume_ba = (bb_ba.maxs.x - bb_ba.mins.x)
-        * (bb_ba.maxs.y - bb_ba.mins.y)
-        * (bb_ba.maxs.z - bb_ba.mins.z);
+    let volume_ba = (bb_ba.maxs.x - bb_ba.mins.x) *
+                   (bb_ba.maxs.y - bb_ba.mins.y) *
+                   (bb_ba.maxs.z - bb_ba.mins.z);
 
     assert!(
         (volume_ab - volume_ba).abs() < crate::float_types::EPSILON * volume_ab.max(volume_ba),
         "Intersection should be commutative: volume_ab={}, volume_ba={}",
-        volume_ab,
-        volume_ba
+        volume_ab, volume_ba
     );
 }
 
@@ -247,99 +204,140 @@ fn test_intersection_idempotency() {
 
     // The intersection should have the same bounding box
     assert!(
-        (original_bb.mins.x - intersect_bb.mins.x).abs() < crate::float_types::EPSILON
-            && (original_bb.maxs.x - intersect_bb.maxs.x).abs() < crate::float_types::EPSILON
-            && (original_bb.mins.y - intersect_bb.mins.y).abs() < crate::float_types::EPSILON
-            && (original_bb.maxs.y - intersect_bb.maxs.y).abs() < crate::float_types::EPSILON
-            && (original_bb.mins.z - intersect_bb.mins.z).abs() < crate::float_types::EPSILON
-            && (original_bb.maxs.z - intersect_bb.maxs.z).abs() < crate::float_types::EPSILON,
+        (original_bb.mins.x - intersect_bb.mins.x).abs() < crate::float_types::EPSILON &&
+        (original_bb.maxs.x - intersect_bb.maxs.x).abs() < crate::float_types::EPSILON &&
+        (original_bb.mins.y - intersect_bb.mins.y).abs() < crate::float_types::EPSILON &&
+        (original_bb.maxs.y - intersect_bb.maxs.y).abs() < crate::float_types::EPSILON &&
+        (original_bb.mins.z - intersect_bb.mins.z).abs() < crate::float_types::EPSILON &&
+        (original_bb.maxs.z - intersect_bb.maxs.z).abs() < crate::float_types::EPSILON,
         "Intersection with self should be identity"
     );
 }
 
 #[test]
 fn test_mirror_symmetry() {
-    // Property: Mirroring should produce a valid mesh with the same number of polygons
+    // Property: Mirroring should preserve volume and create symmetric geometry
     let cube: Mesh<()> = Mesh::cube(2.0, None).expect("Failed to create cube");
     let mirror_plane = crate::mesh::plane::Plane::from_normal(
-        nalgebra::Vector3::new(0.0, 0.0, 1.0), // XY plane at z=0
-        0.0,
+        nalgebra::Vector3::new(0.0, 0.0, 1.0), // XY plane
+        0.0
     );
 
-    let mirrored = cube.mirror(mirror_plane.clone());
+    let mirrored = cube.mirror(mirror_plane);
 
-    // Mirroring should produce a valid mesh
+    // Volume should be preserved
+    let original_bb = cube.bounding_box();
+    let mirrored_bb = mirrored.bounding_box();
+
+    let original_volume = (original_bb.maxs.x - original_bb.mins.x) *
+                         (original_bb.maxs.y - original_bb.mins.y) *
+                         (original_bb.maxs.z - original_bb.mins.z);
+
+    let mirrored_volume = (mirrored_bb.maxs.x - mirrored_bb.mins.x) *
+                         (mirrored_bb.maxs.y - mirrored_bb.mins.y) *
+                         (mirrored_bb.maxs.z - mirrored_bb.mins.z);
+
     assert!(
-        !mirrored.polygons.is_empty(),
-        "Mirror should produce non-empty mesh"
-    );
-    assert_eq!(
-        cube.polygons.len(),
-        mirrored.polygons.len(),
-        "Mirror should preserve polygon count"
+        (original_volume - mirrored_volume).abs() < crate::float_types::EPSILON * original_volume,
+        "Mirror should preserve volume: original={}, mirrored={}",
+        original_volume, mirrored_volume
     );
 
-    // Each polygon should be valid
-    for polygon in &mirrored.polygons {
-        assert!(
-            polygon.vertices.len() >= 3,
-            "Mirror should produce valid polygons"
-        );
-    }
-
-    // Mirroring should be involutory (mirror twice returns to original)
-    let double_mirrored = mirrored.mirror(mirror_plane);
-    assert_eq!(
-        cube.polygons.len(),
-        double_mirrored.polygons.len(),
-        "Double mirror should preserve polygon count"
+    // Mirrored object should be symmetric across the plane
+    assert!(
+        (mirrored_bb.mins.z + mirrored_bb.maxs.z).abs() < crate::float_types::EPSILON,
+        "Mirrored object should be symmetric across mirror plane"
     );
 }
 
 #[test]
 fn test_rotation_orthogonality() {
-    // Property: Rotation should produce a valid mesh with the same structure
-    let cube: Mesh<()> = Mesh::cube(2.0, None).expect("Failed to create cube");
+    // Property: Rotation matrices should be orthogonal (R^T * R = I)
+    let cube: Mesh<()> = Mesh::cube(1.0, None).expect("Failed to create cube");
 
     // Test various rotation angles
     let rotations = vec![
-        (0.0, 0.0, 0.0),  // Identity
-        (1.57, 0.0, 0.0), // 90° around X
-        (0.0, 1.57, 0.0), // 90° around Y
-        (0.0, 0.0, 1.57), // 90° around Z
-        (0.5, 0.3, 0.7),  // Arbitrary rotation
+        (0.0, 0.0, 0.0),    // Identity
+        (1.57, 0.0, 0.0),   // 90° around X
+        (0.0, 1.57, 0.0),   // 90° around Y
+        (0.0, 0.0, 1.57),   // 90° around Z
+        (0.5, 0.3, 0.7),    // Arbitrary rotation
     ];
 
     for (rx, ry, rz) in rotations {
         let rotated = cube.rotate(rx, ry, rz);
 
-        // Rotation should produce a valid mesh
+        let original_bb = cube.bounding_box();
+        let rotated_bb = rotated.bounding_box();
+
+        // Check that bounding box dimensions are preserved (rotation doesn't scale)
+        let original_dims = nalgebra::Vector3::new(
+            original_bb.maxs.x - original_bb.mins.x,
+            original_bb.maxs.y - original_bb.mins.y,
+            original_bb.maxs.z - original_bb.mins.z,
+        );
+
+        let rotated_dims = nalgebra::Vector3::new(
+            rotated_bb.maxs.x - rotated_bb.mins.x,
+            rotated_bb.maxs.y - rotated_bb.mins.y,
+            rotated_bb.maxs.z - rotated_bb.mins.z,
+        );
+
         assert!(
-            !rotated.polygons.is_empty(),
-            "Rotation should produce non-empty mesh"
+            (original_dims.x - rotated_dims.x).abs() < crate::float_types::EPSILON &&
+            (original_dims.y - rotated_dims.y).abs() < crate::float_types::EPSILON &&
+            (original_dims.z - rotated_dims.z).abs() < crate::float_types::EPSILON,
+            "Rotation should preserve dimensions: original={:?}, rotated={:?}",
+            original_dims, rotated_dims
         );
-        assert_eq!(
-            cube.polygons.len(),
-            rotated.polygons.len(),
-            "Rotation should preserve polygon count"
-        );
-
-        // Each polygon should be valid
-        for polygon in &rotated.polygons {
-            assert!(
-                polygon.vertices.len() >= 3,
-                "Rotation should produce valid polygons"
-            );
-        }
     }
+}
 
-    // Test that rotation is composable (multiple rotations should work)
-    let rotated_once = cube.rotate(1.57, 0.0, 0.0);
-    let rotated_twice = rotated_once.rotate(0.0, 1.57, 0.0);
-    assert!(
-        !rotated_twice.polygons.is_empty(),
-        "Multiple rotations should produce valid mesh"
-    );
+#[test]
+fn test_scaling_homogeneity() {
+    // Property: Scaling should be homogeneous (linear)
+    let cube: Mesh<()> = Mesh::cube(1.0, None).expect("Failed to create cube");
+
+    // Test scaling with different factors
+    let scale_factors = vec![
+        (1.0, 1.0, 1.0),    // Identity
+        (2.0, 1.0, 1.0),    // Scale X only
+        (1.0, 3.0, 1.0),    // Scale Y only
+        (1.0, 1.0, 0.5),    // Scale Z only
+        (1.5, 2.5, 0.8),    // Scale all axes
+    ];
+
+    for (sx, sy, sz) in scale_factors {
+        let scaled = cube.scale(sx, sy, sz);
+
+        let original_bb = cube.bounding_box();
+        let scaled_bb = scaled.bounding_box();
+
+        // Check that each dimension scales correctly
+        let original_width = original_bb.maxs.x - original_bb.mins.x;
+        let scaled_width = scaled_bb.maxs.x - scaled_bb.mins.x;
+
+        let original_height = original_bb.maxs.y - original_bb.mins.y;
+        let scaled_height = scaled_bb.maxs.y - scaled_bb.mins.y;
+
+        let original_depth = original_bb.maxs.z - original_bb.mins.z;
+        let scaled_depth = scaled_bb.maxs.z - scaled_bb.mins.z;
+
+        assert!(
+            (scaled_width - original_width * sx).abs() < crate::float_types::EPSILON * original_width,
+            "X scaling should be homogeneous: expected {}, got {}", original_width * sx, scaled_width
+        );
+
+        assert!(
+            (scaled_height - original_height * sy).abs() < crate::float_types::EPSILON * original_height,
+            "Y scaling should be homogeneous: expected {}, got {}", original_height * sy, scaled_height
+        );
+
+        assert!(
+            (scaled_depth - original_depth * sz).abs() < crate::float_types::EPSILON * original_depth,
+            "Z scaling should be homogeneous: expected {}, got {}", original_depth * sz, scaled_depth
+        );
+    }
 }
 
 #[test]

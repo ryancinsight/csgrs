@@ -6,7 +6,10 @@
 pub mod advanced_features;
 pub mod basic_shapes;
 pub mod boolean_ops;
+pub mod indexed_mesh;
 pub mod transformations;
+#[cfg(feature = "wasm-bindgen")]
+pub mod wasm_example;
 
 /// Run all example demonstrations
 pub fn run_all_examples() -> Result<(), Box<dyn std::error::Error>> {
@@ -25,6 +28,9 @@ pub fn run_all_examples() -> Result<(), Box<dyn std::error::Error>> {
     boolean_ops::run_boolean_operations_demo()?;
     boolean_ops::run_complex_boolean_demo()?;
     boolean_ops::run_inversion_demo()?;
+
+    // IndexedMesh features
+    indexed_mesh::run_indexed_mesh_demo()?;
 
     // Advanced features
     advanced_features::run_extrusion_demo()?;
@@ -52,10 +58,24 @@ pub fn run_basic_examples() -> Result<(), Box<dyn std::error::Error>> {
     Ok(())
 }
 
+/// Run IndexedMesh example features
+pub fn run_indexed_mesh_examples() -> Result<(), Box<dyn std::error::Error>> {
+    println!("=== IndexedMesh CSGRS Examples ===\n");
+
+    indexed_mesh::run_basic_shapes_demo()?;
+    indexed_mesh::run_boolean_operations_demo()?;
+    indexed_mesh::run_connectivity_demo()?;
+    indexed_mesh::run_memory_optimization_demo()?;
+
+    println!("\n=== IndexedMesh Examples Completed! ===");
+    Ok(())
+}
+
 /// Run advanced example features
 pub fn run_advanced_examples() -> Result<(), Box<dyn std::error::Error>> {
     println!("=== Advanced CSGRS Examples ===\n");
 
+    indexed_mesh::run_indexed_mesh_demo()?;
     advanced_features::run_extrusion_demo()?;
     advanced_features::run_mesh_processing_demo()?;
     advanced_features::run_metaballs_demo()?;

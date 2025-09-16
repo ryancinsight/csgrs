@@ -49,7 +49,9 @@ impl<F: CoordNum> PathBuilder<F> {
             line.0.push(coord);
             Ok(())
         } else {
-            Err(IoError::MalformedInput("No current path to add line to".to_string()))
+            Err(IoError::MalformedInput(
+                "No current path to add line to".to_string(),
+            ))
         }
     }
 
@@ -65,7 +67,9 @@ impl<F: CoordNum> PathBuilder<F> {
             }
             Ok(())
         } else {
-            Err(IoError::MalformedInput("No current path to add line to".to_string()))
+            Err(IoError::MalformedInput(
+                "No current path to add line to".to_string(),
+            ))
         }
     }
 
@@ -78,7 +82,9 @@ impl<F: CoordNum> PathBuilder<F> {
             }
             Ok(())
         } else {
-            Err(IoError::MalformedInput("No current path to add horizontal line to".to_string()))
+            Err(IoError::MalformedInput(
+                "No current path to add horizontal line to".to_string(),
+            ))
         }
     }
 
@@ -94,7 +100,9 @@ impl<F: CoordNum> PathBuilder<F> {
             }
             Ok(())
         } else {
-            Err(IoError::MalformedInput("No current path to add horizontal line to".to_string()))
+            Err(IoError::MalformedInput(
+                "No current path to add horizontal line to".to_string(),
+            ))
         }
     }
 
@@ -107,7 +115,9 @@ impl<F: CoordNum> PathBuilder<F> {
             }
             Ok(())
         } else {
-            Err(IoError::MalformedInput("No current path to add vertical line to".to_string()))
+            Err(IoError::MalformedInput(
+                "No current path to add vertical line to".to_string(),
+            ))
         }
     }
 
@@ -123,18 +133,28 @@ impl<F: CoordNum> PathBuilder<F> {
             }
             Ok(())
         } else {
-            Err(IoError::MalformedInput("No current path to add vertical line to".to_string()))
+            Err(IoError::MalformedInput(
+                "No current path to add vertical line to".to_string(),
+            ))
         }
     }
 
     /// Quadratic curve to control point and end point
-    pub fn quadratic_curve_to(&mut self, _control: Coord<F>, end: Coord<F>) -> Result<(), IoError> {
+    pub fn quadratic_curve_to(
+        &mut self,
+        _control: Coord<F>,
+        end: Coord<F>,
+    ) -> Result<(), IoError> {
         // Simplified implementation - just add the end point
         self.line_to(end)
     }
 
     /// Quadratic curve by relative control point and end point
-    pub fn quadratic_curve_by(&mut self, _control: Coord<F>, delta: Coord<F>) -> Result<(), IoError> {
+    pub fn quadratic_curve_by(
+        &mut self,
+        _control: Coord<F>,
+        delta: Coord<F>,
+    ) -> Result<(), IoError> {
         self.line_by(delta)
     }
 
@@ -149,23 +169,41 @@ impl<F: CoordNum> PathBuilder<F> {
     }
 
     /// Cubic curve to control points and end point
-    pub fn curve_to(&mut self, _control1: Coord<F>, _control2: Coord<F>, end: Coord<F>) -> Result<(), IoError> {
+    pub fn curve_to(
+        &mut self,
+        _control1: Coord<F>,
+        _control2: Coord<F>,
+        end: Coord<F>,
+    ) -> Result<(), IoError> {
         // Simplified implementation - just add the end point
         self.line_to(end)
     }
 
     /// Cubic curve by relative control points and end point
-    pub fn curve_by(&mut self, _control1: Coord<F>, _control2: Coord<F>, delta: Coord<F>) -> Result<(), IoError> {
+    pub fn curve_by(
+        &mut self,
+        _control1: Coord<F>,
+        _control2: Coord<F>,
+        delta: Coord<F>,
+    ) -> Result<(), IoError> {
         self.line_by(delta)
     }
 
     /// Smooth cubic curve to control point and end point
-    pub fn smooth_curve_to(&mut self, _control2: Coord<F>, end: Coord<F>) -> Result<(), IoError> {
+    pub fn smooth_curve_to(
+        &mut self,
+        _control2: Coord<F>,
+        end: Coord<F>,
+    ) -> Result<(), IoError> {
         self.line_to(end)
     }
 
     /// Smooth cubic curve by relative control point and end point
-    pub fn smooth_curve_by(&mut self, _control2: Coord<F>, delta: Coord<F>) -> Result<(), IoError> {
+    pub fn smooth_curve_by(
+        &mut self,
+        _control2: Coord<F>,
+        delta: Coord<F>,
+    ) -> Result<(), IoError> {
         self.line_by(delta)
     }
 
@@ -182,10 +220,14 @@ impl<F: CoordNum> PathBuilder<F> {
         // Simplified implementation - convert and add the end point
         let end_f = Coord {
             x: F::from(end.x).ok_or_else(|| {
-                IoError::MalformedInput("Failed to convert elliptical arc coordinate".to_string())
+                IoError::MalformedInput(
+                    "Failed to convert elliptical arc coordinate".to_string(),
+                )
             })?,
             y: F::from(end.y).ok_or_else(|| {
-                IoError::MalformedInput("Failed to convert elliptical arc coordinate".to_string())
+                IoError::MalformedInput(
+                    "Failed to convert elliptical arc coordinate".to_string(),
+                )
             })?,
         };
         self.line_to(end_f)
@@ -203,10 +245,14 @@ impl<F: CoordNum> PathBuilder<F> {
     ) -> Result<(), IoError> {
         let delta_f = Coord {
             x: F::from(delta.x).ok_or_else(|| {
-                IoError::MalformedInput("Failed to convert elliptical arc coordinate".to_string())
+                IoError::MalformedInput(
+                    "Failed to convert elliptical arc coordinate".to_string(),
+                )
             })?,
             y: F::from(delta.y).ok_or_else(|| {
-                IoError::MalformedInput("Failed to convert elliptical arc coordinate".to_string())
+                IoError::MalformedInput(
+                    "Failed to convert elliptical arc coordinate".to_string(),
+                )
             })?,
         };
         self.line_by(delta_f)
@@ -234,10 +280,16 @@ impl<F: CoordNum> PathBuilder<F> {
             if let Some(last) = line.0.last() {
                 *last
             } else {
-                Coord { x: F::zero(), y: F::zero() }
+                Coord {
+                    x: F::zero(),
+                    y: F::zero(),
+                }
             }
         } else {
-            Coord { x: F::zero(), y: F::zero() }
+            Coord {
+                x: F::zero(),
+                y: F::zero(),
+            }
         }
     }
 
@@ -246,7 +298,9 @@ impl<F: CoordNum> PathBuilder<F> {
         if let Some(ref mut line) = self.current_line {
             Ok(line)
         } else {
-            Err(IoError::MalformedInput("No current path available".to_string()))
+            Err(IoError::MalformedInput(
+                "No current path available".to_string(),
+            ))
         }
     }
 }
@@ -450,7 +504,7 @@ pub fn svg_path_to_multi_line_string<F: CoordNum>(
             Close => {
                 // Close command should have been handled in the parameter count check above
                 return Err(IoError::MalformedPath(
-                    "Unexpected Close command in SVG path parsing".to_string()
+                    "Unexpected Close command in SVG path parsing".to_string(),
                 ));
             },
         }

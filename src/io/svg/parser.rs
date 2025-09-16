@@ -5,9 +5,11 @@
 
 use crate::float_types::Real;
 use crate::io::IoError;
+use crate::io::svg::{
+    parse_svg_transform, svg_path_to_multi_line_string, svg_points_to_line_string,
+};
 use crate::sketch::Sketch;
 use crate::traits::CSG;
-    use crate::io::svg::{parse_svg_transform, svg_path_to_multi_line_string, svg_points_to_line_string};
 use nalgebra::Matrix3;
 use std::collections::HashMap;
 
@@ -27,12 +29,11 @@ pub fn parse_svg_to_sketch(doc: &str) -> Result<Sketch<()>, IoError> {
 
     macro_rules! expect_attr {
         ($attrs:expr, $attr:literal) => {
-            $attrs.get($attr).ok_or_else(|| {
-                IoError::MalformedInput(format!("Missing attribute {}", $attr))
-            })
+            $attrs
+                .get($attr)
+                .ok_or_else(|| IoError::MalformedInput(format!("Missing attribute {}", $attr)))
         };
     }
-
 
     let mut sketch_union = Sketch::<()>::new();
 
@@ -59,7 +60,10 @@ pub fn parse_svg_to_sketch(doc: &str) -> Result<Sketch<()>, IoError> {
 
             Event::Tag(tag::Group, Start, attrs) => {
                 // Get current transform context
-                let current_context = transform_stack.last().expect("Transform stack should always have at least one element").clone();
+                let current_context = transform_stack
+                    .last()
+                    .expect("Transform stack should always have at least one element")
+                    .clone();
 
                 // Parse transform attribute if present
                 let mut group_transform = Matrix3::identity();
@@ -104,7 +108,9 @@ pub fn parse_svg_to_sketch(doc: &str) -> Result<Sketch<()>, IoError> {
                 let mut sketch = Sketch::from_geo(mls.into(), None);
 
                 // Apply current transform
-                let current_context = transform_stack.last().expect("Transform stack should always have at least one element");
+                let current_context = transform_stack
+                    .last()
+                    .expect("Transform stack should always have at least one element");
                 if current_context.transform != Matrix3::identity() {
                     let mut transform_4x4 = nalgebra::Matrix4::identity();
                     transform_4x4
@@ -125,7 +131,9 @@ pub fn parse_svg_to_sketch(doc: &str) -> Result<Sketch<()>, IoError> {
                 let mut sketch = Sketch::circle(r, segments, None).translate(cx, cy, 0.0);
 
                 // Apply current transform
-                let current_context = transform_stack.last().expect("Transform stack should always have at least one element");
+                let current_context = transform_stack
+                    .last()
+                    .expect("Transform stack should always have at least one element");
                 if current_context.transform != Matrix3::identity() {
                     let mut transform_4x4 = nalgebra::Matrix4::identity();
                     transform_4x4
@@ -144,11 +152,13 @@ pub fn parse_svg_to_sketch(doc: &str) -> Result<Sketch<()>, IoError> {
                 let ry: Real = expect_attr!(attrs, "ry")?.parse()?;
 
                 let segments = ((rx + ry) / 2.0).ceil() as usize;
-                let mut sketch = Sketch::ellipse(rx * 2.0, ry * 2.0, segments, None)
-                    .translate(cx, cy, 0.0);
+                let mut sketch =
+                    Sketch::ellipse(rx * 2.0, ry * 2.0, segments, None).translate(cx, cy, 0.0);
 
                 // Apply current transform
-                let current_context = transform_stack.last().expect("Transform stack should always have at least one element");
+                let current_context = transform_stack
+                    .last()
+                    .expect("Transform stack should always have at least one element");
                 if current_context.transform != Matrix3::identity() {
                     let mut transform_4x4 = nalgebra::Matrix4::identity();
                     transform_4x4
@@ -160,14 +170,15 @@ pub fn parse_svg_to_sketch(doc: &str) -> Result<Sketch<()>, IoError> {
                 sketch_union = sketch_union.union(&sketch);
             },
 
-
             Event::Tag(tag::Polygon, Empty, attrs) => {
                 let points = expect_attr!(attrs, "points")?;
                 let line_string = svg_points_to_line_string(points)?;
                 let mut sketch = Sketch::from_geo(line_string.into(), None);
 
                 // Apply current transform
-                let current_context = transform_stack.last().expect("Transform stack should always have at least one element");
+                let current_context = transform_stack
+                    .last()
+                    .expect("Transform stack should always have at least one element");
                 if current_context.transform != Matrix3::identity() {
                     let mut transform_4x4 = nalgebra::Matrix4::identity();
                     transform_4x4
@@ -185,7 +196,9 @@ pub fn parse_svg_to_sketch(doc: &str) -> Result<Sketch<()>, IoError> {
                 let mut sketch = Sketch::from_geo(line_string.into(), None);
 
                 // Apply current transform
-                let current_context = transform_stack.last().expect("Transform stack should always have at least one element");
+                let current_context = transform_stack
+                    .last()
+                    .expect("Transform stack should always have at least one element");
                 if current_context.transform != Matrix3::identity() {
                     let mut transform_4x4 = nalgebra::Matrix4::identity();
                     transform_4x4

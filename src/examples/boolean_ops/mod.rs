@@ -18,7 +18,9 @@ pub fn run_boolean_operations_demo() -> Result<(), Box<dyn std::error::Error>> {
 
     // Create base shapes
     let cube = MeshType::cube(2.0, None).expect("Failed to create cube");
-    let sphere = MeshType::sphere(1.25, 16, 8, None).expect("Failed to create sphere").translate(1.0, 1.0, 1.0);
+    let sphere = MeshType::sphere(1.25, 16, 8, None)
+        .expect("Failed to create sphere")
+        .translate(1.0, 1.0, 1.0);
 
     #[cfg(feature = "stl-io")]
     {
@@ -60,7 +62,9 @@ pub fn run_complex_boolean_demo() -> Result<(), Box<dyn std::error::Error>> {
 
     // Create multiple shapes for complex operations
     let cube1 = MeshType::cube(3.0, None).expect("Failed to create cube");
-    let cube2 = MeshType::cube(3.0, None).expect("Failed to create cube").translate(1.0, 1.0, 1.0);
+    let cube2 = MeshType::cube(3.0, None)
+        .expect("Failed to create cube")
+        .translate(1.0, 1.0, 1.0);
     let sphere = MeshType::sphere(2.0, 16, 8, None).expect("Failed to create sphere");
 
     #[cfg(feature = "stl-io")]

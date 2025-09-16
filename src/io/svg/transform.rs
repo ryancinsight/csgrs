@@ -164,27 +164,32 @@ mod tests {
         use nalgebra::Matrix3;
 
         // Test translate
-        let matrix = parse_svg_transform("translate(10,20)").expect("Failed to parse translate transform");
+        let matrix = parse_svg_transform("translate(10,20)")
+            .expect("Failed to parse translate transform");
         let expected = Matrix3::new(1.0, 0.0, 10.0, 0.0, 1.0, 20.0, 0.0, 0.0, 1.0);
         assert_eq!(matrix, expected);
 
         // Test translate with single value
-        let matrix = parse_svg_transform("translate(15)").expect("Failed to parse single-value translate transform");
+        let matrix = parse_svg_transform("translate(15)")
+            .expect("Failed to parse single-value translate transform");
         let expected = Matrix3::new(1.0, 0.0, 15.0, 0.0, 1.0, 0.0, 0.0, 0.0, 1.0);
         assert_eq!(matrix, expected);
 
         // Test scale
-        let matrix = parse_svg_transform("scale(2,3)").expect("Failed to parse scale transform");
+        let matrix =
+            parse_svg_transform("scale(2,3)").expect("Failed to parse scale transform");
         let expected = Matrix3::new(2.0, 0.0, 0.0, 0.0, 3.0, 0.0, 0.0, 0.0, 1.0);
         assert_eq!(matrix, expected);
 
         // Test scale with single value
-        let matrix = parse_svg_transform("scale(2)").expect("Failed to parse single-value scale transform");
+        let matrix = parse_svg_transform("scale(2)")
+            .expect("Failed to parse single-value scale transform");
         let expected = Matrix3::new(2.0, 0.0, 0.0, 0.0, 2.0, 0.0, 0.0, 0.0, 1.0);
         assert_eq!(matrix, expected);
 
         // Test rotate
-        let matrix = parse_svg_transform("rotate(45)").expect("Failed to parse rotate transform");
+        let matrix =
+            parse_svg_transform("rotate(45)").expect("Failed to parse rotate transform");
         let cos45 = 45f64.to_radians().cos();
         let sin45 = 45f64.to_radians().sin();
         let expected = Matrix3::new(cos45, -sin45, 0.0, sin45, cos45, 0.0, 0.0, 0.0, 1.0);
@@ -193,12 +198,14 @@ mod tests {
         }
 
         // Test matrix
-        let matrix = parse_svg_transform("matrix(1,2,3,4,5,6)").expect("Failed to parse matrix transform");
+        let matrix = parse_svg_transform("matrix(1,2,3,4,5,6)")
+            .expect("Failed to parse matrix transform");
         let expected = Matrix3::new(1.0, 3.0, 5.0, 2.0, 4.0, 6.0, 0.0, 0.0, 1.0);
         assert_eq!(matrix, expected);
 
         // Test skewX
-        let matrix = parse_svg_transform("skewX(30)").expect("Failed to parse skewX transform");
+        let matrix =
+            parse_svg_transform("skewX(30)").expect("Failed to parse skewX transform");
         let tan30 = 30f64.to_radians().tan();
         let expected = Matrix3::new(1.0, tan30, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 1.0);
         for i in 0..9 {

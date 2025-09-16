@@ -104,7 +104,7 @@ fn test_winding_consistency_triangle_variations() {
     // **Mathematical Foundation**: Winding consistency across triangle variations
     // All triangles with same winding should produce consistent normal directions
 
-    let triangle_variations = vec![
+    let triangle_variations = [
         // Standard CCW triangle
         vec![
             Vertex::new(Point3::new(0.0, 0.0, 0.0), Vector3::z()),
@@ -476,7 +476,9 @@ fn test_winding_consistency_mesh_operations() {
 
     // Create two cubes with consistent winding
     let cube1 = crate::mesh::Mesh::<()>::cube(1.0, None).expect("Failed to create cube");
-    let cube2 = crate::mesh::Mesh::<()>::cube(1.0, None).expect("Failed to create cube").translate(0.5, 0.5, 0.5);
+    let cube2 = crate::mesh::Mesh::<()>::cube(1.0, None)
+        .expect("Failed to create cube")
+        .translate(0.5, 0.5, 0.5);
 
     // Union operation
     let union_result = cube1.union(&cube2);
@@ -539,7 +541,7 @@ fn test_winding_right_hand_rule_validation() {
     // Verify that curling fingers from first to second to third vertex
     // produces thumb in normal direction
 
-    let test_cases = vec![
+    let test_cases = [
         // CCW triangle in XY plane
         (
             vec![
@@ -596,6 +598,281 @@ fn test_winding_normal_interpolation_consistency() {
         approx_eq(interpolated.normal.norm(), 1.0, crate::float_types::EPSILON),
         "Interpolated normal should be unit length: magnitude {}",
         interpolated.normal.norm()
+    );
+}
+
+#[test]
+fn test_winding_normal_complex_non_planar_polygon() {
+    // **Mathematical Foundation**: Complex non-planar polygon winding
+    // Tests winding detection for polygons that are not perfectly planar
+    // Should still detect dominant winding direction despite minor deviations
+
+    let vertices = vec![
+        Vertex::new(Point3::new(0.0, 0.0, 0.0), Vector3::z()),
+        Vertex::new(Point3::new(2.0, 0.0, 0.1), Vector3::z()), // slight Z deviation
+        Vertex::new(Point3::new(2.0, 2.0, -0.1), Vector3::z()), // slight Z deviation
+        Vertex::new(Point3::new(0.0, 2.0, 0.05), Vector3::z()), // slight Z deviation
+    ];
+
+    let plane = Plane::from_vertices(vertices);
+    let normal = plane.normal();
+
+    // Should still detect CCW winding despite non-planarity
+    assert!(
+        normal.z > 0.0,
+        "Non-planar polygon should still have positive Z normal for CCW winding, got {:?}",
+        normal
+    );
+}
+
+#[test]
+fn test_winding_normal_self_intersecting_polygon() {
+    // **Mathematical Foundation**: Self-intersecting polygon winding
+    // Tests winding detection for polygons that cross themselves
+    // The result depends on the specific triangulation and may vary
+
+    let vertices = vec![
+        Vertex::new(Point3::new(0.0, 0.0, 0.0), Vector3::z()),
+        Vertex::new(Point3::new(2.0, 1.0, 0.0), Vector3::z()),
+        Vertex::new(Point3::new(1.0, 0.5, 0.0), Vector3::z()), // causes self-intersection
+        Vertex::new(Point3::new(2.0, -1.0, 0.0), Vector3::z()),
+        Vertex::new(Point3::new(0.0, -2.0, 0.0), Vector3::z()),
+    ];
+
+    let plane = Plane::from_vertices(vertices);
+    let normal = plane.normal();
+
+    // Self-intersecting polygons can produce unpredictable results
+    // The important thing is that we get a reasonable unit normal
+    assert!(
+        normal.norm() > 0.9, // Should be close to unit length
+        "Self-intersecting polygon should produce reasonable normal magnitude, got {:?}",
+        normal
+    );
+
+    // The normal should be a valid unit vector
+    assert!(
+        (normal.norm() - 1.0).abs() < crate::float_types::EPSILON * 10.0,
+        "Self-intersecting polygon normal should be unit length, got magnitude {}",
+        normal.norm()
+    );
+}
+
+#[test]
+fn test_winding_normal_precision_boundary_subnormal() {
+    // **Mathematical Foundation**: Precision boundary with subnormal numbers
+    // Tests winding detection with extremely small coordinates approaching subnormal range
+    // IEEE 754 subnormal numbers: |x| < 2^(-126) for f32, |x| < 2^(-1022) for f64
+
+    let tiny = 1e-40; // Well into subnormal range for f64
+    let vertices = vec![
+        Vertex::new(Point3::new(tiny, tiny, 0.0), Vector3::z()),
+        Vertex::new(Point3::new(-tiny, tiny, 0.0), Vector3::z()),
+        Vertex::new(Point3::new(0.0, -tiny, 0.0), Vector3::z()),
+    ];
+
+    let plane = Plane::from_vertices(vertices);
+    let normal = plane.normal();
+
+    // Should still correctly detect CCW winding even with subnormal coordinates
+    assert!(
+        normal.z > 0.0,
+        "Subnormal coordinate polygon should have positive Z normal for CCW winding, got {:?}",
+        normal
+    );
+
+    // Normal should be unit length despite tiny input coordinates
+    assert!(
+        (normal.norm() - 1.0).abs() < crate::float_types::EPSILON * 10.0,
+        "Normal should be unit length even with subnormal coordinates, got magnitude {}",
+        normal.norm()
+    );
+}
+
+#[test]
+fn test_winding_normal_extreme_coordinates() {
+    // **Mathematical Foundation**: Extreme coordinate values
+    // Tests winding detection with very large coordinate values
+    // Should handle precision loss and maintain correct winding detection
+
+    let huge = 1e15;
+    let vertices = vec![
+        Vertex::new(Point3::new(huge, huge, 0.0), Vector3::z()),
+        Vertex::new(Point3::new(-huge, huge, 0.0), Vector3::z()),
+        Vertex::new(Point3::new(0.0, -huge, 0.0), Vector3::z()),
+    ];
+
+    let plane = Plane::from_vertices(vertices);
+    let normal = plane.normal();
+
+    // Should still correctly detect CCW winding even with extreme coordinates
+    assert!(
+        normal.z > 0.0,
+        "Extreme coordinate polygon should have positive Z normal for CCW winding, got {:?}",
+        normal
+    );
+}
+
+#[test]
+fn test_winding_normal_collinear_vertices_with_noise() {
+    // **Mathematical Foundation**: Nearly collinear vertices with small perturbations
+    // Tests robustness when vertices are almost but not quite collinear
+    // Should still produce reasonable normal vectors
+
+    let vertices = vec![
+        Vertex::new(Point3::new(0.0, 0.0, 0.0), Vector3::z()),
+        Vertex::new(Point3::new(1.0, 0.001, 0.0), Vector3::z()), // small Y perturbation
+        Vertex::new(Point3::new(2.0, 0.002, 0.0), Vector3::z()), // small Y perturbation
+    ];
+
+    let plane = Plane::from_vertices(vertices);
+    let normal = plane.normal();
+
+    // Should produce a reasonable normal despite near-collinearity
+    assert!(
+        normal.norm() > 0.1, // Should not be near-zero
+        "Near-collinear vertices should still produce reasonable normal, got {:?}",
+        normal
+    );
+
+    // Z component should still be positive for this winding
+    assert!(
+        normal.z > 0.0,
+        "Near-collinear vertices should maintain correct winding direction, got Z={}",
+        normal.z
+    );
+}
+
+#[test]
+fn test_winding_normal_minimum_three_vertices() {
+    // **Mathematical Foundation**: Minimum vertex count for winding detection
+    // Tests that exactly 3 vertices produce correct winding detection
+    // Any fewer vertices should be handled gracefully
+
+    let vertices = vec![
+        Vertex::new(Point3::new(0.0, 0.0, 0.0), Vector3::z()),
+        Vertex::new(Point3::new(1.0, 0.0, 0.0), Vector3::z()),
+        Vertex::new(Point3::new(0.5, 1.0, 0.0), Vector3::z()),
+    ];
+
+    let plane = Plane::from_vertices(vertices);
+    let normal = plane.normal();
+
+    // Should correctly detect CCW winding for exactly 3 vertices
+    assert!(
+        normal.z > 0.0,
+        "Exactly 3 vertices should produce correct CCW winding, got Z={}",
+        normal.z
+    );
+}
+
+#[test]
+fn test_winding_normal_large_vertex_count() {
+    // **Mathematical Foundation**: Large polygon vertex counts
+    // Tests winding detection with many vertices (stress test)
+    // Should maintain correctness and performance with large polygons
+
+    let mut vertices = Vec::new();
+    let num_vertices = 100; // Large polygon
+
+    // Create a large CCW circle
+    for i in 0..num_vertices {
+        let angle = 2.0 * std::f64::consts::PI * (i as f64) / (num_vertices as f64);
+        let x = angle.cos();
+        let y = angle.sin();
+        vertices.push(Vertex::new(Point3::new(x, y, 0.0), Vector3::z()));
+    }
+
+    let plane = Plane::from_vertices(vertices);
+    let normal = plane.normal();
+
+    // Should correctly detect CCW winding even with many vertices
+    assert!(
+        normal.z > 0.0,
+        "Large vertex count polygon should maintain correct CCW winding, got Z={}",
+        normal.z
+    );
+}
+
+#[test]
+fn test_winding_normal_arbitrary_plane_orientation() {
+    // **Mathematical Foundation**: Arbitrary plane orientations
+    // Tests winding detection for polygons not in XY plane
+    // Should correctly handle different plane orientations
+
+    // Polygon in XZ plane (rotated around Y axis) - CCW when viewed from positive Y
+    let vertices_xz = vec![
+        Vertex::new(Point3::new(0.0, 0.0, 0.0), Vector3::y()),
+        Vertex::new(Point3::new(0.5, 0.0, 1.0), Vector3::y()), // Correct CCW order
+        Vertex::new(Point3::new(1.0, 0.0, 0.0), Vector3::y()),
+    ];
+
+    let plane_xz = Plane::from_vertices(vertices_xz);
+    let normal_xz = plane_xz.normal();
+
+    // Should detect positive Y normal for this orientation (CCW in XZ plane)
+    assert!(
+        normal_xz.y > 0.0,
+        "XZ plane polygon should have positive Y normal, got {:?}",
+        normal_xz
+    );
+
+    // Polygon in YZ plane (rotated around X axis)
+    let vertices_yz = vec![
+        Vertex::new(Point3::new(0.0, 0.0, 0.0), Vector3::x()),
+        Vertex::new(Point3::new(0.0, 1.0, 0.0), Vector3::x()),
+        Vertex::new(Point3::new(0.0, 0.5, 1.0), Vector3::x()),
+    ];
+
+    let plane_yz = Plane::from_vertices(vertices_yz);
+    let normal_yz = plane_yz.normal();
+
+    // Should detect positive X normal for this orientation
+    assert!(
+        normal_yz.x > 0.0,
+        "YZ plane polygon should have positive X normal, got {:?}",
+        normal_yz
+    );
+}
+
+#[test]
+fn test_winding_normal_vertex_order_sensitivity() {
+    // **Mathematical Foundation**: Vertex order sensitivity
+    // Tests that winding detection is sensitive to vertex order
+    // Reversing order should reverse the normal direction
+
+    let ccw_vertices = vec![
+        Vertex::new(Point3::new(0.0, 0.0, 0.0), Vector3::z()),
+        Vertex::new(Point3::new(1.0, 0.0, 0.0), Vector3::z()),
+        Vertex::new(Point3::new(0.5, 1.0, 0.0), Vector3::z()),
+    ];
+
+    let cw_vertices = vec![
+        Vertex::new(Point3::new(0.0, 0.0, 0.0), Vector3::z()),
+        Vertex::new(Point3::new(0.5, 1.0, 0.0), Vector3::z()), // reversed order
+        Vertex::new(Point3::new(1.0, 0.0, 0.0), Vector3::z()),
+    ];
+
+    let ccw_plane = Plane::from_vertices(ccw_vertices);
+    let cw_plane = Plane::from_vertices(cw_vertices);
+
+    let ccw_normal = ccw_plane.normal();
+    let cw_normal = cw_plane.normal();
+
+    // CCW should have positive Z, CW should have negative Z
+    assert!(
+        ccw_normal.z > 0.0 && cw_normal.z < 0.0,
+        "Vertex order should affect winding: CCW Z={}, CW Z={}",
+        ccw_normal.z,
+        cw_normal.z
+    );
+
+    // Normals should be equal in magnitude but opposite in direction
+    assert!(
+        (ccw_normal.norm() - cw_normal.norm()).abs() < crate::float_types::EPSILON,
+        "CCW and CW normals should have equal magnitude: CCW={}, CW={}",
+        ccw_normal.norm(),
+        cw_normal.norm()
     );
 }
 

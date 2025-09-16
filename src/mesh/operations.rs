@@ -7,7 +7,10 @@ use std::fmt::Debug;
 use std::num::NonZeroU32;
 
 #[cfg(feature = "parallel")]
-use rayon::iter::{IntoParallelRefIterator, IntoParallelRefMutIterator, ParallelIterator, IntoParallelIterator};
+use rayon::iter::{
+    IntoParallelIterator, IntoParallelRefIterator, IntoParallelRefMutIterator,
+    ParallelIterator,
+};
 
 use super::Mesh;
 
@@ -53,15 +56,11 @@ impl<S: Clone + Send + Sync + Debug> Mesh<S> {
         let estimated_capacity = self.polygons.len() * 2;
 
         let mut triangles: Vec<Polygon<S>> = Vec::with_capacity(estimated_capacity);
-        triangles.extend(
-            self.polygons
-                .iter()
-                .flat_map(|poly| {
-                    poly.triangulate().into_iter().map(move |triangle| {
-                        Polygon::new(triangle.to_vec(), poly.metadata.clone())
-                    })
-                })
-        );
+        triangles.extend(self.polygons.iter().flat_map(|poly| {
+            poly.triangulate()
+                .into_iter()
+                .map(move |triangle| Polygon::new(triangle.to_vec(), poly.metadata.clone()))
+        }));
 
         // Reclaim unused capacity if we over-allocated significantly
         triangles.shrink_to_fit();
@@ -89,7 +88,8 @@ impl<S: Clone + Send + Sync + Debug> Mesh<S> {
         {
             #[cfg(feature = "parallel")]
             {
-                let polygons: Vec<_> = self.polygons
+                let polygons: Vec<_> = self
+                    .polygons
                     .par_iter()
                     .flat_map(|poly| {
                         let sub_tris = poly.subdivide_triangles(levels);
@@ -104,16 +104,12 @@ impl<S: Clone + Send + Sync + Debug> Mesh<S> {
 
             #[cfg(not(feature = "parallel"))]
             {
-                new_polygons.extend(
-                    self.polygons
-                        .iter()
-                        .flat_map(|poly| {
-                            let sub_tris = poly.subdivide_triangles(levels);
-                            sub_tris.into_iter().map(move |tri| {
-                                Polygon::new(vec![tri[0], tri[1], tri[2]], poly.metadata.clone())
-                            })
-                        })
-                );
+                new_polygons.extend(self.polygons.iter().flat_map(|poly| {
+                    let sub_tris = poly.subdivide_triangles(levels);
+                    sub_tris.into_iter().map(move |tri| {
+                        Polygon::new(vec![tri[0], tri[1], tri[2]], poly.metadata.clone())
+                    })
+                }));
             }
         }
 
@@ -151,13 +147,17 @@ impl<S: Clone + Send + Sync + Debug> Mesh<S> {
                 .sum();
             let mut new_polygons = Vec::with_capacity(total_subdivisions);
 
-            let polygons: Vec<_> = self.polygons.par_iter_mut().flat_map(|poly| {
-                let sub_tris = poly.subdivide_triangles(levels);
-                // Convert each small tri back to a Polygon
-                sub_tris
-                    .into_par_iter()
-                    .map(move |tri| Polygon::new(tri.to_vec(), poly.metadata.clone()))
-            }).collect();
+            let polygons: Vec<_> = self
+                .polygons
+                .par_iter_mut()
+                .flat_map(|poly| {
+                    let sub_tris = poly.subdivide_triangles(levels);
+                    // Convert each small tri back to a Polygon
+                    sub_tris
+                        .into_par_iter()
+                        .map(move |tri| Polygon::new(tri.to_vec(), poly.metadata.clone()))
+                })
+                .collect();
             new_polygons.extend(polygons);
 
             self.polygons = new_polygons;

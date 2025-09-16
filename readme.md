@@ -105,6 +105,55 @@ fn main() {
 }
 ```
 
+### IndexedMesh Bevy Integration
+
+IndexedMesh supports direct conversion to Bevy meshes with automatic triangulation and memory-efficient vertex buffer creation:
+
+```rust
+use csgrs::indexed_mesh::IndexedMesh;
+use csgrs::traits::CSG;
+
+// Create an indexed cube with memory-efficient vertex deduplication
+let cube: IndexedMesh<()> = IndexedMesh::cube(2.0, None);
+
+// Convert to Bevy mesh with automatic triangulation
+let bevy_mesh = cube.to_bevy_mesh();
+
+// Use in Bevy scene with proper vertex attributes and indices
+// The conversion preserves normals and handles quad->triangle conversion automatically
+```
+
+### IndexedMesh Physics Integration
+
+IndexedMesh provides comprehensive physics integration with Rapier, supporting collision detection, mass properties calculation, and rigid body simulation:
+
+```rust
+use csgrs::indexed_mesh::IndexedMesh;
+
+// Create physics-enabled IndexedMesh
+let sphere: IndexedMesh<()> = IndexedMesh::sphere(1.0, 16, 8, None);
+
+// Convert to Rapier collision shape
+let collision_shape = sphere.to_rapier_shape().unwrap();
+
+// Calculate mass properties
+let density = 1.0;
+if let Some((mass, center_of_mass, inertia_tensor)) = sphere.mass_properties(density) {
+    println!("Mass: {}, Center of mass: {:?}", mass, center_of_mass.coords);
+}
+
+// Create rigid body with collider
+use csgrs::float_types::rapier3d::prelude::*;
+let mut rb_set = RigidBodySet::new();
+let mut co_set = ColliderSet::new();
+
+let translation = vector![0.0, 0.0, 0.0];
+let rotation = vector![0.0, 0.0, 0.0]; // No rotation
+let rb_handle = sphere.to_rigid_body(&mut rb_set, &mut co_set, translation, rotation, density);
+
+// Physics simulation ready!
+```
+
 ### IndexedMesh File I/O
 
 IndexedMesh provides optimized import/export capabilities for major 3D file formats with automatic vertex deduplication through a unified I/O architecture:
@@ -164,9 +213,17 @@ with, `f3d cube_sphere_difference.stl`, and should look like this:
 
 ### Building for WASM
 
+WebAssembly support is available through the `wasm` feature, which provides a minimal feature set optimized for web environments:
+
 ```shell
+# Build for WebAssembly
 cargo build --features="wasm" --target=wasm32-unknown-unknown --release
+
+# Run WASM examples (when wasm-bindgen feature is enabled)
+cargo run --features="wasm,wasm-bindgen" --bin csgrs-examples -- wasm
 ```
+
+The WASM build excludes dependencies requiring system resources (like DXF file I/O) while maintaining core CSG functionality, SIMD optimizations, and triangulation capabilities.
 
 ## Features and Structures
 

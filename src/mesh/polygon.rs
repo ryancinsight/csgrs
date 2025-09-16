@@ -168,7 +168,7 @@ impl<S: Clone + Send + Sync> Polygon<S> {
         let (u, v) = build_orthonormal_basis(normal_3d);
         let origin_3d = self.vertices[0].pos;
 
-        #[cfg(feature = "earcut")]
+        #[cfg(all(feature = "earcut", not(feature = "delaunay")))]
         {
             // Flatten each vertex to 2D
             let mut all_vertices_2d = Vec::with_capacity(self.vertices.len());
@@ -256,6 +256,15 @@ impl<S: Clone + Send + Sync> Polygon<S> {
                 ]);
             }
             final_triangles
+        }
+
+        #[cfg(not(any(feature = "delaunay", feature = "earcut")))]
+        {
+            // This should never be reached due to compile-time checks in lib.rs
+            // But we provide a fallback for safety
+            compile_error!(
+                "Triangulation requires either 'delaunay' or 'earcut' feature to be enabled"
+            );
         }
     }
 

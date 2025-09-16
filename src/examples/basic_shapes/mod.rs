@@ -29,7 +29,8 @@ pub fn run_basic_shapes_demo() -> Result<(), Box<dyn std::error::Error>> {
         fs::write("stl/sphere.stl", stl_data)?;
         println!("✓ Created sphere.stl");
 
-        let cylinder = MeshType::cylinder(1.0, 2.0, 32, None).expect("Failed to create cylinder");
+        let cylinder =
+            MeshType::cylinder(1.0, 2.0, 32, None).expect("Failed to create cylinder");
         let stl_data = cylinder.to_stl_binary("cylinder")?;
         fs::write("stl/cylinder.stl", stl_data)?;
         println!("✓ Created cylinder.stl");

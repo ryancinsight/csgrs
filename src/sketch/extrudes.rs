@@ -46,7 +46,11 @@ impl<S: Clone + Debug + Send + Sync> Sketch<S> {
     ///
     /// ## **Returns**
     /// A 3D mesh representing the solid of revolution
-    pub fn revolve(&self, angle_degrees: Real, segments: usize) -> Result<Mesh<S>, crate::errors::ValidationError> {
+    pub fn revolve(
+        &self,
+        angle_degrees: Real,
+        segments: usize,
+    ) -> Result<Mesh<S>, crate::errors::ValidationError> {
         // Validate parameters
         if segments < 3 {
             return Err(crate::errors::ValidationError::InvalidShapeParameter(
@@ -68,7 +72,13 @@ impl<S: Clone + Debug + Send + Sync> Sketch<S> {
 
         // Process each geometry in the sketch
         for geom in &self.geometry {
-            Self::revolve_geometry(geom, angle_radians, segments, &self.metadata, &mut polygons)?;
+            Self::revolve_geometry(
+                geom,
+                angle_radians,
+                segments,
+                &self.metadata,
+                &mut polygons,
+            )?;
         }
 
         Ok(Mesh {
@@ -100,12 +110,24 @@ impl<S: Clone + Debug + Send + Sync> Sketch<S> {
             },
             geo::Geometry::MultiLineString(mls) => {
                 for ls in &mls.0 {
-                    Self::revolve_line_string(ls, angle_radians, segments, metadata, polygons)?;
+                    Self::revolve_line_string(
+                        ls,
+                        angle_radians,
+                        segments,
+                        metadata,
+                        polygons,
+                    )?;
                 }
             },
             geo::Geometry::GeometryCollection(gc) => {
                 for sub_geom in &gc.0 {
-                    Self::revolve_geometry(sub_geom, angle_radians, segments, metadata, polygons)?;
+                    Self::revolve_geometry(
+                        sub_geom,
+                        angle_radians,
+                        segments,
+                        metadata,
+                        polygons,
+                    )?;
                 }
             },
             // Point and MultiPoint don't contribute to revolution surface
@@ -312,14 +334,16 @@ impl<S: Clone + Debug + Send + Sync> Sketch<S> {
     }
 
     /// Extract coordinates from a GeoPolygon for triangulation
-    fn extract_polygon_coords(poly: &GeoPolygon<Real>) -> (Vec<[Real; 2]>, Vec<Vec<[Real; 2]>>) {
-                let exterior_coords: Vec<[Real; 2]> =
-                    poly.exterior().coords_iter().map(|c| [c.x, c.y]).collect();
-                let interior_rings: Vec<Vec<[Real; 2]>> = poly
-                    .interiors()
-                    .iter()
-                    .map(|ring| ring.coords_iter().map(|c| [c.x, c.y]).collect())
-                    .collect();
+    fn extract_polygon_coords(
+        poly: &GeoPolygon<Real>,
+    ) -> (Vec<[Real; 2]>, Vec<Vec<[Real; 2]>>) {
+        let exterior_coords: Vec<[Real; 2]> =
+            poly.exterior().coords_iter().map(|c| [c.x, c.y]).collect();
+        let interior_rings: Vec<Vec<[Real; 2]>> = poly
+            .interiors()
+            .iter()
+            .map(|ring| ring.coords_iter().map(|c| [c.x, c.y]).collect())
+            .collect();
         (exterior_coords, interior_rings)
     }
 
@@ -332,21 +356,21 @@ impl<S: Clone + Debug + Send + Sync> Sketch<S> {
     ) {
         // Generate bottom faces
         for tri in tris {
-                    let v0 = Vertex::new(tri[2], -Vector3::z());
-                    let v1 = Vertex::new(tri[1], -Vector3::z());
-                    let v2 = Vertex::new(tri[0], -Vector3::z());
-                    out_polygons.push(Polygon::new(vec![v0, v1, v2], metadata.clone()));
-                }
+            let v0 = Vertex::new(tri[2], -Vector3::z());
+            let v1 = Vertex::new(tri[1], -Vector3::z());
+            let v2 = Vertex::new(tri[0], -Vector3::z());
+            out_polygons.push(Polygon::new(vec![v0, v1, v2], metadata.clone()));
+        }
 
         // Generate top faces
         for tri in tris {
-                    let p0 = tri[0] + direction;
-                    let p1 = tri[1] + direction;
-                    let p2 = tri[2] + direction;
-                    let v0 = Vertex::new(p0, Vector3::z());
-                    let v1 = Vertex::new(p1, Vector3::z());
-                    let v2 = Vertex::new(p2, Vector3::z());
-                    out_polygons.push(Polygon::new(vec![v0, v1, v2], metadata.clone()));
+            let p0 = tri[0] + direction;
+            let p1 = tri[1] + direction;
+            let p2 = tri[2] + direction;
+            let v0 = Vertex::new(p0, Vector3::z());
+            let v1 = Vertex::new(p1, Vector3::z());
+            let v2 = Vertex::new(p2, Vector3::z());
+            out_polygons.push(Polygon::new(vec![v0, v1, v2], metadata.clone()));
         }
     }
 
@@ -357,27 +381,27 @@ impl<S: Clone + Debug + Send + Sync> Sketch<S> {
         metadata: &Option<S>,
         out_polygons: &mut Vec<Polygon<S>>,
     ) {
-                let all_rings = std::iter::once(poly.exterior()).chain(poly.interiors());
-                for ring in all_rings {
-                    let coords: Vec<_> = ring.coords_iter().collect();
-                    for window in coords.windows(2) {
-                        let c_i = window[0];
-                        let c_j = window[1];
-                        let b_i = Point3::new(c_i.x, c_i.y, 0.0);
-                        let b_j = Point3::new(c_j.x, c_j.y, 0.0);
-                        let t_i = b_i + direction;
-                        let t_j = b_j + direction;
-                        out_polygons.push(Polygon::new(
-                            vec![
-                                Vertex::new(b_i, Vector3::zeros()),
-                                Vertex::new(b_j, Vector3::zeros()),
-                                Vertex::new(t_j, Vector3::zeros()),
-                                Vertex::new(t_i, Vector3::zeros()),
-                            ],
-                            metadata.clone(),
-                        ));
-                    }
-                }
+        let all_rings = std::iter::once(poly.exterior()).chain(poly.interiors());
+        for ring in all_rings {
+            let coords: Vec<_> = ring.coords_iter().collect();
+            for window in coords.windows(2) {
+                let c_i = window[0];
+                let c_j = window[1];
+                let b_i = Point3::new(c_i.x, c_i.y, 0.0);
+                let b_j = Point3::new(c_j.x, c_j.y, 0.0);
+                let t_i = b_i + direction;
+                let t_j = b_j + direction;
+                out_polygons.push(Polygon::new(
+                    vec![
+                        Vertex::new(b_i, Vector3::zeros()),
+                        Vertex::new(b_j, Vector3::zeros()),
+                        Vertex::new(t_j, Vector3::zeros()),
+                        Vertex::new(t_i, Vector3::zeros()),
+                    ],
+                    metadata.clone(),
+                ));
+            }
+        }
     }
 
     /// Handle extrusion of a single polygon geometry
@@ -404,14 +428,14 @@ impl<S: Clone + Debug + Send + Sync> Sketch<S> {
         metadata: &Option<S>,
         out_polygons: &mut Vec<Polygon<S>>,
     ) {
-                for poly in &mp.0 {
-                    Self::extrude_geometry(
-                        &geo::Geometry::Polygon(poly.clone()),
-                        direction,
-                        metadata,
-                        out_polygons,
-                    );
-                }
+        for poly in &mp.0 {
+            Self::extrude_geometry(
+                &geo::Geometry::Polygon(poly.clone()),
+                direction,
+                metadata,
+                out_polygons,
+            );
+        }
     }
 
     /// Handle extrusion of a geometry collection
@@ -421,9 +445,9 @@ impl<S: Clone + Debug + Send + Sync> Sketch<S> {
         metadata: &Option<S>,
         out_polygons: &mut Vec<Polygon<S>>,
     ) {
-                for sub in &gc.0 {
-                    Self::extrude_geometry(sub, direction, metadata, out_polygons);
-                }
+        for sub in &gc.0 {
+            Self::extrude_geometry(sub, direction, metadata, out_polygons);
+        }
     }
 
     /// Handle extrusion of a line string geometry
@@ -433,25 +457,25 @@ impl<S: Clone + Debug + Send + Sync> Sketch<S> {
         metadata: &Option<S>,
         out_polygons: &mut Vec<Polygon<S>>,
     ) {
-                // extrude line strings into side surfaces
-                let coords: Vec<_> = ls.coords_iter().collect();
+        // extrude line strings into side surfaces
+        let coords: Vec<_> = ls.coords_iter().collect();
         for window in coords.windows(2) {
             let c_i = window[0];
             let c_j = window[1];
-                    let b_i = Point3::new(c_i.x, c_i.y, 0.0);
-                    let b_j = Point3::new(c_j.x, c_j.y, 0.0);
-                    let t_i = b_i + direction;
-                    let t_j = b_j + direction;
-                    out_polygons.push(Polygon::new(
-                        vec![
+            let b_i = Point3::new(c_i.x, c_i.y, 0.0);
+            let b_j = Point3::new(c_j.x, c_j.y, 0.0);
+            let t_i = b_i + direction;
+            let t_j = b_j + direction;
+            out_polygons.push(Polygon::new(
+                vec![
                     Vertex::new(b_i, Vector3::zeros()),
                     Vertex::new(b_j, Vector3::zeros()),
                     Vertex::new(t_j, Vector3::zeros()),
                     Vertex::new(t_i, Vector3::zeros()),
-                        ],
-                        metadata.clone(),
-                    ));
-                }
+                ],
+                metadata.clone(),
+            ));
+        }
     }
 
     /// A helper to handle any Geometry

@@ -62,7 +62,11 @@ impl fmt::Display for ValidationError {
             ValidationError::IndexOutOfRange => write!(f, "Index out of range"),
             ValidationError::InvalidArguments => write!(f, "Invalid arguments"),
             ValidationError::InvalidDimension(param, value) => {
-                write!(f, "Invalid {} dimension: {} (must be positive and finite)", param, value)
+                write!(
+                    f,
+                    "Invalid {} dimension: {} (must be positive and finite)",
+                    param, value
+                )
             },
             ValidationError::InvalidShapeParameter(param, reason) => {
                 write!(f, "Invalid {} parameter: {}", param, reason)

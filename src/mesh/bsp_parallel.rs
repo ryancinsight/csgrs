@@ -15,7 +15,6 @@ use crate::mesh::Polygon;
 #[cfg(feature = "parallel")]
 use crate::mesh::Vertex;
 
-
 impl<S: Clone + Send + Sync + Debug> Node<S> {
     /// Invert all polygons in the BSP tree using iterative approach to avoid stack overflow
     #[cfg(feature = "parallel")]
