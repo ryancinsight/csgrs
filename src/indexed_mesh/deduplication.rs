@@ -273,7 +273,7 @@ mod tests {
             Vertex::new(Point3::new(1.0 + epsilon * 100.0, 2.0, 3.0), Vector3::z()),
         ];
 
-        let vertices = vec![base_vertex.clone()]
+        let vertices = vec![base_vertex]
             .into_iter()
             .chain(test_cases)
             .collect::<Vec<_>>();

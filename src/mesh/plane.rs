@@ -201,10 +201,12 @@ impl Plane {
         };
 
         // Construct the reference normal for the original polygon using Newell's Method.
+        // Use the first vertex as the reference point to avoid issues with polygons far from origin
+        let reference_point = vertices[0].pos;
         let reference_normal = vertices.iter().zip(vertices.iter().cycle().skip(1)).fold(
             Vector3::zeros(),
             |acc, (curr, next)| {
-                acc + (curr.pos - Point3::origin()).cross(&(next.pos - Point3::origin()))
+                acc + (curr.pos - reference_point).cross(&(next.pos - reference_point))
             },
         );
 

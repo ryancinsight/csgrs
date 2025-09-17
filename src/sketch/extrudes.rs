@@ -30,7 +30,7 @@ impl<S: Clone + Debug + Send + Sync> Sketch<S> {
     /// For a 2D profile curve C(u) = (x(u), z(u)) revolved around Y-axis:
     /// ```text
     /// S(u,v) = (x(u)·cos(v), y(u), x(u)·sin(v))
-    /// where u ∈ [0,1] parameterizes the profile
+    /// where u ∈ \\[0,1\\] parameterizes the profile
     ///       v ∈ [0,θ] parameterizes the revolution angle
     /// ```
     ///
@@ -261,8 +261,8 @@ impl<S: Clone + Debug + Send + Sync> Sketch<S> {
     /// For a 2D boundary curve C(u) and direction vector d⃗:
     /// ```text
     /// S(u,v) = C(u) + v·d⃗
-    /// where u ∈ [0,1] parameterizes the boundary
-    ///       v ∈ [0,1] parameterizes the extrusion
+    /// where u ∈ \\[0,1\\] parameterizes the boundary
+    ///       v ∈ \\[0,1\\] parameterizes the extrusion
     /// ```
     ///
     /// ### **Surface Normal Computation**

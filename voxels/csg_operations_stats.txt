@@ -1,0 +1,7 @@
+Voxel CSG Operations Statistics:
+Sphere 1 - Occupied: 34222
+Sphere 2 - Occupied: 34216
+Union - Occupied: 63973
+Intersection - Occupied: 4463
+Difference - Occupied: 29758
+XOR - Occupied: 59510

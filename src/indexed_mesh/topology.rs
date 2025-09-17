@@ -894,10 +894,6 @@ mod tests {
 
         // The mesh should have fewer topology errors after hole filling
         // (Advanced hole filling is complex and may not be perfect)
-        assert!(
-            true,
-            "Advanced hole filling function completed without panicking"
-        );
     }
 
     #[test]
@@ -906,7 +902,7 @@ mod tests {
 
         // Create non-manifold edge by duplicating a vertex improperly
         let original_vertex_count = mesh.vertices.len();
-        let vertex_to_duplicate = mesh.vertices[0].clone();
+        let vertex_to_duplicate = mesh.vertices[0];
         mesh.vertices.push(vertex_to_duplicate);
 
         // Update one face to use the new vertex

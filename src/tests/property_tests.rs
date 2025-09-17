@@ -368,3 +368,149 @@ fn test_difference_inverse_consistency() {
         "A - B should differ from B - A for different operands"
     );
 }
+
+#[test]
+fn test_intersection_associativity() {
+    // Property: (A ∩ B) ∩ C = A ∩ (B ∩ C) (intersection should be associative)
+    let sphere1: Mesh<()> = Mesh::sphere(2.0, 16, 8, None)
+        .expect("Failed to create sphere")
+        .translate(1.0, 0.0, 0.0);
+    let sphere2: Mesh<()> = Mesh::sphere(2.0, 16, 8, None)
+        .expect("Failed to create sphere")
+        .translate(-0.5, 0.0, 0.0);
+    let sphere3: Mesh<()> = Mesh::sphere(2.0, 16, 8, None)
+        .expect("Failed to create sphere")
+        .translate(0.0, 1.0, 0.0);
+
+    let left_assoc = sphere1.intersection(&sphere2).intersection(&sphere3);
+    let right_assoc = sphere1.intersection(&sphere2.intersection(&sphere3));
+
+    let bb_left = left_assoc.bounding_box();
+    let bb_right = right_assoc.bounding_box();
+
+    assert!(
+        (bb_left.mins.x - bb_right.mins.x).abs() < crate::float_types::EPSILON
+            && (bb_left.maxs.x - bb_right.maxs.x).abs() < crate::float_types::EPSILON
+            && (bb_left.mins.y - bb_right.mins.y).abs() < crate::float_types::EPSILON
+            && (bb_left.maxs.y - bb_right.maxs.y).abs() < crate::float_types::EPSILON
+            && (bb_left.mins.z - bb_right.mins.z).abs() < crate::float_types::EPSILON
+            && (bb_left.maxs.z - bb_right.maxs.z).abs() < crate::float_types::EPSILON,
+        "Intersection should be associative"
+    );
+}
+
+#[test]
+fn test_union_absorption() {
+    // Property: A ∪ (A ∩ B) = A (absorption law)
+    let cube: Mesh<()> = Mesh::cube(2.0, None).expect("Failed to create cube");
+    let sphere: Mesh<()> = Mesh::sphere(1.5, 16, 8, None).expect("Failed to create sphere");
+
+    let intersection = cube.intersection(&sphere);
+    let absorption_result = cube.union(&intersection);
+
+    let bb_cube = cube.bounding_box();
+    let bb_absorption = absorption_result.bounding_box();
+
+    // The result should have the same or larger bounding box as the original cube
+    // (absorption should not shrink the bounds)
+    assert!(
+        bb_absorption.maxs.x >= bb_cube.maxs.x - crate::float_types::EPSILON
+            && bb_absorption.maxs.y >= bb_cube.maxs.y - crate::float_types::EPSILON
+            && bb_absorption.maxs.z >= bb_cube.maxs.z - crate::float_types::EPSILON,
+        "Union absorption law should preserve or expand bounds: A ∪ (A ∩ B) bounds should contain A bounds"
+    );
+}
+
+#[test]
+fn test_transformation_composition() {
+    // Property: Transformations should compose correctly (matrix multiplication order)
+    let original: Mesh<()> = Mesh::cube(2.0, None).expect("Failed to create cube");
+
+    // Apply transformations in different orders
+    let translate_first = original.translate(1.0, 2.0, 3.0).rotate(0.1, 0.2, 0.3);
+    let rotate_first = original.rotate(0.1, 0.2, 0.3).translate(1.0, 2.0, 3.0);
+
+    // Results should be different (transformations don't commute)
+    let bb_translate_first = translate_first.bounding_box();
+    let bb_rotate_first = rotate_first.bounding_box();
+
+    // At least one dimension should differ (transformations are non-commutative)
+    let bounds_differ = (bb_translate_first.mins.x - bb_rotate_first.mins.x).abs()
+        > crate::float_types::EPSILON
+        || (bb_translate_first.maxs.x - bb_rotate_first.maxs.x).abs()
+            > crate::float_types::EPSILON
+        || (bb_translate_first.mins.y - bb_rotate_first.mins.y).abs()
+            > crate::float_types::EPSILON
+        || (bb_translate_first.maxs.y - bb_rotate_first.maxs.y).abs()
+            > crate::float_types::EPSILON
+        || (bb_translate_first.mins.z - bb_rotate_first.mins.z).abs()
+            > crate::float_types::EPSILON
+        || (bb_translate_first.maxs.z - bb_rotate_first.maxs.z).abs()
+            > crate::float_types::EPSILON;
+
+    assert!(bounds_differ, "Translation and rotation should not commute");
+}
+
+#[test]
+fn test_mesh_volume_conservation() {
+    // Property: Mesh volume should be conserved under rigid transformations
+    let original: Mesh<()> = Mesh::cube(2.0, None).expect("Failed to create cube");
+
+    // Expected volume: side³ = 8.0
+    let expected_volume = 8.0;
+
+    if let Some((mass_original, _, _)) = original.mass_properties(1.0) {
+        assert!(
+            (mass_original - expected_volume).abs() < 1e-6,
+            "Original cube volume should be 8.0, got {}",
+            mass_original
+        );
+    }
+
+    // Apply rigid transformations (should preserve volume)
+    let transformations = vec![
+        original.translate(1.0, 2.0, 3.0),
+        original.rotate(0.1, 0.2, 0.3),
+        original.rotate(1.57, 0.0, 0.0).translate(5.0, 0.0, 0.0), // Rotation + translation
+    ];
+
+    for transformed in transformations {
+        if let Some((mass_transformed, _, _)) = transformed.mass_properties(1.0) {
+            assert!(
+                (mass_transformed - expected_volume).abs() < 1e-5,
+                "Rigid transformation should preserve volume: expected {}, got {}",
+                expected_volume,
+                mass_transformed
+            );
+        }
+    }
+}
+
+#[test]
+fn test_boolean_operation_emptiness() {
+    // Property: Intersection of disjoint shapes should be empty
+    let cube1: Mesh<()> = Mesh::cube(1.0, None)
+        .expect("Failed to create cube")
+        .translate(3.0, 0.0, 0.0); // Move far apart
+    let cube2: Mesh<()> = Mesh::cube(1.0, None)
+        .expect("Failed to create cube")
+        .translate(-3.0, 0.0, 0.0);
+
+    let intersection = cube1.intersection(&cube2);
+
+    // Intersection of disjoint shapes should be empty or nearly empty
+    assert!(
+        intersection.polygons.is_empty() || intersection.polygons.len() < 3,
+        "Intersection of disjoint shapes should be empty or minimal, got {} polygons",
+        intersection.polygons.len()
+    );
+
+    // Bounding box should be degenerate or very small
+    let bb = intersection.bounding_box();
+    let volume = (bb.maxs.x - bb.mins.x) * (bb.maxs.y - bb.mins.y) * (bb.maxs.z - bb.mins.z);
+    assert!(
+        volume < 1e-6,
+        "Intersection volume should be near zero, got {}",
+        volume
+    );
+}

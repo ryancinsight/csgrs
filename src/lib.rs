@@ -3,6 +3,20 @@
 //!
 //! ![Example CSG output][Example CSG output]
 #![cfg_attr(doc, doc = doc_image_embed::embed_image!("Example CSG output", "docs/csg.png"))]
+//! ## Surface Quality Considerations
+//!
+//! **Mesh/IndexedMesh Systems**: Provide smooth, mathematically precise surfaces using polygon-based representations
+//! **Sparse Voxel System**: Uses discrete volume sampling for efficient CSG operations but produces blocky surfaces
+//!
+//! For applications requiring smooth surfaces, use Mesh or IndexedMesh primitives. The sparse voxel system
+//! excels at volume-based boolean operations but inherently produces blocky, low-resolution surfaces due to
+//! discrete voxel sampling and cube-based mesh reconstruction.
+//!
+//! ## Documentation
+//! - **[User Guide](https://github.com/timschmidt/csgrs/blob/main/docs/user_guide.md)**: Practical examples and usage patterns
+//! - **[Mathematical Foundations](https://github.com/timschmidt/csgrs/blob/main/docs/mathematical_foundations.md)**: Theoretical basis and algorithmic principles
+//! - **[API Reference](https://docs.rs/csgrs)**: Generated Rust documentation
+//!
 //! # Features
 //! #### Default
 //! - **f64**: use f64 as Real
@@ -34,7 +48,6 @@ pub mod float_types;
 pub mod indexed_mesh;
 pub mod io;
 pub mod mesh;
-pub mod nurbs;
 pub mod sketch;
 pub mod traits;
 pub mod voxels;

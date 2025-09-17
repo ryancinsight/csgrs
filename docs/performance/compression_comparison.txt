@@ -1,0 +1,4 @@
+Compression Comparison:
+Uncompressed - Memory: 22640 bytes, Nodes: 283
+Compressed - Memory: 2560 bytes, Nodes: 32
+Space Savings: 0.0%

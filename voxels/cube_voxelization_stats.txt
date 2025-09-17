@@ -1,0 +1,6 @@
+Cube Voxelization Statistics:
+Original Mesh Polygons: 6
+Voxel Grid Size: 9x9x9
+Voxel Size: 0.25
+Occupied Voxels: 448
+Occupancy Ratio: 61.45%

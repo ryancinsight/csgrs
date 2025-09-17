@@ -143,7 +143,7 @@ impl<S: Clone + Debug + Send + Sync> Mesh<S> {
     /// The sphere surface is defined by:
     /// ```text
     /// S(u,v) = r(sin(πv)cos(2πu), cos(πv), sin(πv)sin(2πu))
-    /// where u ∈ [0,1], v ∈ [0,1]
+    /// where u ∈ \\[0,1\\], v ∈ \\[0,1\\]
     /// ```
     ///
     /// ### **Tessellation Algorithm**

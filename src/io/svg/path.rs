@@ -537,7 +537,7 @@ pub fn svg_path_to_multi_line_string<F: CoordNum>(
     Ok(MultiLineString::new(converted_lines))
 }
 
-/// Parse contents of the SVG <polyline/> and <polygon/> attribute [`points`][points] into a `LineString`.
+/// Parse contents of the SVG `<polyline>` and `<polygon>` attribute [`points`][points] into a `LineString`.
 ///
 /// [points]: https://www.w3.org/TR/SVG11/shapes.html#PointsBNF
 pub fn svg_points_to_line_string<F: CoordNum>(points: &str) -> Result<LineString<F>, IoError> {

@@ -329,7 +329,7 @@ impl<S: Clone + Send + Sync + Debug> CSG for Mesh<S> {
         mesh
     }
 
-    /// Returns a [`parry3d::bounding_volume::Aabb`] indicating the 3D bounds of all `polygons`.
+    /// Returns an [`Aabb`] indicating the 3D bounds of all `polygons`.
     fn bounding_box(&self) -> Aabb {
         *self.bounding_box.get_or_init(|| {
             // Track overall min/max in x, y, z among all 3D polygons

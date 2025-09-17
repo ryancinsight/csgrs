@@ -1,0 +1,6 @@
+Voxel Grid Statistics:
+Dimensions: 10x10x10
+Voxel Size: 0.5
+Occupied Voxels: 10
+Occupancy Ratio: 1.00%
+Memory Usage: 1000 bytes

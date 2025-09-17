@@ -7,8 +7,12 @@ pub mod advanced_features;
 pub mod basic_shapes;
 pub mod boolean_ops;
 pub mod indexed_mesh;
+pub mod sparse_voxels_demo;
 pub mod transformations;
-#[cfg(feature = "wasm-bindgen")]
+#[cfg(all(
+    feature = "wasm-bindgen",
+    any(target_arch = "wasm32", target_arch = "wasm64")
+))]
 pub mod wasm_example;
 
 /// Run all example demonstrations
@@ -18,6 +22,12 @@ pub fn run_all_examples() -> Result<(), Box<dyn std::error::Error>> {
     // Basic shapes
     basic_shapes::run_basic_shapes_demo()?;
     basic_shapes::run_2d_shapes_demo()?;
+
+    // Voxel operations
+    basic_shapes::run_all_voxel_demos()?;
+
+    // Sparse voxel demonstration
+    sparse_voxels_demo::run_sparse_voxels_demo()?;
 
     // Transformations
     transformations::run_basic_transformations_demo()?;

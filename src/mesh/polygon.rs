@@ -197,6 +197,18 @@ impl<S: Clone + Send + Sync> Polygon<S> {
                     let pos_3d = origin_3d.coords + (x * u) + (y * v);
                     tri_vertices[k] = Vertex::new(Point3::from(pos_3d), normal_3d);
                 }
+
+                // Ensure consistent winding: check if triangle normal matches plane normal
+                // If not, swap vertices to correct winding
+                let [v0, v1, v2] = &tri_vertices;
+                let tri_normal = (v1.pos - v0.pos).cross(&(v2.pos - v0.pos));
+                if tri_normal.dot(&normal_3d) < 0.0 {
+                    // Triangle has wrong winding, swap v1 and v2 to correct orientation
+                    #[cfg(debug_assertions)]
+                    eprintln!("Correcting triangle winding in earcut triangulation");
+                    tri_vertices = [v0.clone(), v2.clone(), v1.clone()];
+                }
+
                 triangles.push(tri_vertices);
             }
             return triangles;
@@ -249,11 +261,24 @@ impl<S: Clone + Send + Sync> Polygon<S> {
                 let pos_b_3d = origin_3d.coords + coord_b.x * u + coord_b.y * v;
                 let pos_c_3d = origin_3d.coords + coord_c.x * u + coord_c.y * v;
 
-                final_triangles.push([
+                let mut tri_vertices = [
                     Vertex::new(Point3::from(pos_a_3d), normal_3d),
                     Vertex::new(Point3::from(pos_b_3d), normal_3d),
                     Vertex::new(Point3::from(pos_c_3d), normal_3d),
-                ]);
+                ];
+
+                // Ensure consistent winding: check if triangle normal matches plane normal
+                // If not, swap vertices to correct winding
+                let [v0, v1, v2] = &tri_vertices;
+                let tri_normal = (v1.pos - v0.pos).cross(&(v2.pos - v0.pos));
+                if tri_normal.dot(&normal_3d) < 0.0 {
+                    // Triangle has wrong winding, swap v1 and v2 to correct orientation
+                    #[cfg(debug_assertions)]
+                    eprintln!("Correcting triangle winding in delaunay triangulation");
+                    tri_vertices = [*v0, *v2, *v1];
+                }
+
+                final_triangles.push(tri_vertices);
             }
             final_triangles
         }

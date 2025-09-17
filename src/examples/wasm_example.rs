@@ -4,17 +4,30 @@
 //! allowing geometric operations to run in web browsers and other
 //! WebAssembly environments.
 
-use wasm_bindgen::prelude::*;
-use crate::traits::CSG;
-use crate::mesh::Mesh;
 use crate::indexed_mesh::IndexedMesh;
+use crate::mesh::Mesh;
+use crate::traits::CSG;
+
+#[cfg(all(
+    feature = "wasm-bindgen",
+    any(target_arch = "wasm32", target_arch = "wasm64")
+))]
+use wasm_bindgen::prelude::*;
 
 /// WebAssembly interface for basic CSG operations
+#[cfg(all(
+    feature = "wasm-bindgen",
+    any(target_arch = "wasm32", target_arch = "wasm64")
+))]
 #[wasm_bindgen]
 pub struct WasmCsg {
     mesh: Mesh<()>,
 }
 
+#[cfg(all(
+    feature = "wasm-bindgen",
+    any(target_arch = "wasm32", target_arch = "wasm64")
+))]
 #[wasm_bindgen]
 impl WasmCsg {
     /// Create a new cube mesh
@@ -27,14 +40,16 @@ impl WasmCsg {
     /// Create a new sphere mesh
     #[wasm_bindgen]
     pub fn new_sphere(radius: f64, segments: usize, stacks: usize) -> WasmCsg {
-        let mesh = Mesh::sphere(radius, segments, stacks, None).expect("Failed to create sphere mesh");
+        let mesh = Mesh::sphere(radius, segments, stacks, None)
+            .expect("Failed to create sphere mesh");
         WasmCsg { mesh }
     }
 
     /// Create a new cylinder mesh
     #[wasm_bindgen]
     pub fn new_cylinder(radius: f64, height: f64, segments: usize) -> WasmCsg {
-        let mesh = Mesh::cylinder(radius, height, segments, None).expect("Failed to create cylinder mesh");
+        let mesh = Mesh::cylinder(radius, height, segments, None)
+            .expect("Failed to create cylinder mesh");
         WasmCsg { mesh }
     }
 
@@ -100,11 +115,19 @@ impl WasmCsg {
 }
 
 /// WebAssembly interface for IndexedMesh operations
+#[cfg(all(
+    feature = "wasm-bindgen",
+    any(target_arch = "wasm32", target_arch = "wasm64")
+))]
 #[wasm_bindgen]
 pub struct WasmIndexedMesh {
     mesh: IndexedMesh<()>,
 }
 
+#[cfg(all(
+    feature = "wasm-bindgen",
+    any(target_arch = "wasm32", target_arch = "wasm64")
+))]
 #[wasm_bindgen]
 impl WasmIndexedMesh {
     /// Create a new indexed cube
@@ -168,7 +191,10 @@ impl WasmIndexedMesh {
 }
 
 /// Run a simple WASM demonstration
-#[cfg(feature = "wasm-bindgen")]
+#[cfg(all(
+    feature = "wasm-bindgen",
+    any(target_arch = "wasm32", target_arch = "wasm64")
+))]
 pub fn run_wasm_demo() -> Result<(), Box<dyn std::error::Error>> {
     // Create basic shapes
     let cube = WasmCsg::new_cube(2.0);
@@ -178,9 +204,21 @@ pub fn run_wasm_demo() -> Result<(), Box<dyn std::error::Error>> {
     let difference = cube.difference(&sphere);
 
     println!("WebAssembly CSG Demo:");
-    println!("- Cube: {} vertices, {} faces", cube.vertex_count(), cube.face_count());
-    println!("- Sphere: {} vertices, {} faces", sphere.vertex_count(), sphere.face_count());
-    println!("- Difference: {} vertices, {} faces", difference.vertex_count(), difference.face_count());
+    println!(
+        "- Cube: {} vertices, {} faces",
+        cube.vertex_count(),
+        cube.face_count()
+    );
+    println!(
+        "- Sphere: {} vertices, {} faces",
+        sphere.vertex_count(),
+        sphere.face_count()
+    );
+    println!(
+        "- Difference: {} vertices, {} faces",
+        difference.vertex_count(),
+        difference.face_count()
+    );
 
     // Test IndexedMesh
     let indexed_cube = WasmIndexedMesh::new_cube(2.0);
@@ -188,20 +226,37 @@ pub fn run_wasm_demo() -> Result<(), Box<dyn std::error::Error>> {
     let indexed_diff = indexed_cube.difference(&indexed_sphere);
 
     println!("\nIndexedMesh Demo:");
-    println!("- Cube: {} vertices, {} faces", indexed_cube.vertex_count(), indexed_cube.face_count());
-    println!("- Sphere: {} vertices, {} faces", indexed_sphere.vertex_count(), indexed_sphere.face_count());
-    println!("- Difference: {} vertices, {} faces, manifold: {}",
-             indexed_diff.vertex_count(),
-             indexed_diff.face_count(),
-             indexed_diff.is_manifold());
+    println!(
+        "- Cube: {} vertices, {} faces",
+        indexed_cube.vertex_count(),
+        indexed_cube.face_count()
+    );
+    println!(
+        "- Sphere: {} vertices, {} faces",
+        indexed_sphere.vertex_count(),
+        indexed_sphere.face_count()
+    );
+    println!(
+        "- Difference: {} vertices, {} faces, manifold: {}",
+        indexed_diff.vertex_count(),
+        indexed_diff.face_count(),
+        indexed_diff.is_manifold()
+    );
 
     println!("\nWebAssembly support successfully demonstrated!");
     Ok(())
 }
 
-#[cfg(not(feature = "wasm-bindgen"))]
+#[cfg(not(all(
+    feature = "wasm-bindgen",
+    any(target_arch = "wasm32", target_arch = "wasm64")
+)))]
 pub fn run_wasm_demo() -> Result<(), Box<dyn std::error::Error>> {
-    println!("WebAssembly demo requires the 'wasm-bindgen' feature to be enabled.");
-    println!("Run with: cargo run --features wasm --bin csgrs-examples -- wasm");
+    println!(
+        "WebAssembly demo requires the 'wasm-bindgen' feature to be enabled and WASM target architecture."
+    );
+    println!(
+        "Run with: cargo run --features wasm --target wasm32-unknown-unknown --bin csgrs-examples -- wasm"
+    );
     Ok(())
 }

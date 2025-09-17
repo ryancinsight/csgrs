@@ -188,7 +188,9 @@ pub fn sphere<S: Clone + Send + Sync + Debug>(
     }
 
     // Handle bottom cap (triangles from last ring to bottom pole)
-    let last_ring_start = *ring_starts.last().expect("Ring starts should be populated for valid sphere parameters");
+    let last_ring_start = *ring_starts
+        .last()
+        .expect("Ring starts should be populated for valid sphere parameters");
     for segment in 0..segments {
         let next_segment = (segment + 1) % segments;
         let v1 = last_ring_start + segment;

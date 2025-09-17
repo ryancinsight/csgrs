@@ -1,0 +1,6 @@
+Voxel Transformation Statistics:
+Original - Occupied: 64
+Translated - Occupied: 64
+Rotated - Occupied: 64
+Scaled - Occupied: 33
+Transformations applied via CSG trait methods

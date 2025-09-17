@@ -930,7 +930,7 @@ mod tests {
             let start = Instant::now();
             let mut normal_count = 0;
             for face in &sphere.faces {
-                if let Some(_) = sphere.compute_face_normal(&face.vertices) {
+                if sphere.compute_face_normal(&face.vertices).is_some() {
                     normal_count += 1;
                 }
             }
@@ -1003,8 +1003,7 @@ mod tests {
         // **SRS Requirement NFR004**: Robust floating-point arithmetic
 
         // Test with challenging numerical combinations
-        let test_cases = vec![
-            // Very small triangle
+        let test_cases = [
             vec![
                 Point3::new(0.0, 0.0, 0.0),
                 Point3::new(1e-8, 0.0, 0.0),
@@ -1585,7 +1584,7 @@ mod tests {
         let base_cube = crate::indexed_mesh::shapes::cube::<()>(1.0, None);
 
         // Apply various transformations and verify normal consistency
-        let transforms = vec![
+        let transforms = [
             Matrix4::new_translation(&Vector3::new(1000.0, 2000.0, 3000.0)),
             Matrix4::new_scaling(0.001),
             Matrix4::new_nonuniform_scaling(&Vector3::new(100.0, 0.01, 1.0)),
@@ -2626,8 +2625,7 @@ mod tests {
                     "WARNING: Both faces have same normal direction - winding error detected"
                 );
                 // This indicates both faces are wound the same way, which is incorrect for a cube
-                assert!(
-                    false,
+                unreachable!(
                     "Cube faces 0 and 1 have same normal direction - check face vertex ordering"
                 );
             } else {
@@ -2752,7 +2750,7 @@ mod tests {
         if let Some(_mesh) = trimesh {
             // TriMesh should have correct number of triangles
             // Note: TriMesh internal structure may vary, but creation should succeed
-            assert!(true); // Placeholder - actual validation depends on TriMesh API
+            // Placeholder - actual validation depends on TriMesh API
         }
     }
 
@@ -2770,13 +2768,36 @@ mod tests {
         assert!(mass_props.is_some());
 
         if let Some((mass, com, _inertia_frame)) = mass_props {
-            // Basic validation of mass properties
-            assert!(mass > 0.0); // Mass should be positive
+            // For a cube of side 2.0 and density 1.0:
+            // Volume = 2.0³ = 8.0, so mass = volume × density = 8.0
+            assert!(
+                (mass - 8.0).abs() < 1e-6,
+                "Mass should be exactly 8.0 (volume × density), got {}",
+                mass
+            );
 
             // Center of mass should be at origin for symmetric cube
-            assert!(com.x.abs() < 1e-6);
-            assert!(com.y.abs() < 1e-6);
-            assert!(com.z.abs() < 1e-6);
+            assert!(com.x.abs() < 1e-6, "COM x should be 0, got {}", com.x);
+            assert!(com.y.abs() < 1e-6, "COM y should be 0, got {}", com.y);
+            assert!(com.z.abs() < 1e-6, "COM z should be 0, got {}", com.z);
+
+            // Verify bounds are correct (cube extends from -1 to 1)
+            let bbox = cube.bounding_box();
+            assert!(
+                (bbox.mins.x - (-1.0)).abs() < 1e-6,
+                "Min x bound should be -1.0"
+            );
+            assert!((bbox.maxs.x - 1.0).abs() < 1e-6, "Max x bound should be 1.0");
+            assert!(
+                (bbox.mins.y - (-1.0)).abs() < 1e-6,
+                "Min y bound should be -1.0"
+            );
+            assert!((bbox.maxs.y - 1.0).abs() < 1e-6, "Max y bound should be 1.0");
+            assert!(
+                (bbox.mins.z - (-1.0)).abs() < 1e-6,
+                "Min z bound should be -1.0"
+            );
+            assert!((bbox.maxs.z - 1.0).abs() < 1e-6, "Max z bound should be 1.0");
         }
     }
 
@@ -2802,8 +2823,8 @@ mod tests {
         assert!(rb_handle.is_some());
 
         // Verify the rigid body was added to the set
-        assert!(rb_set.len() > 0);
-        assert!(co_set.len() > 0);
+        assert!(!rb_set.is_empty());
+        assert!(!co_set.is_empty());
     }
 
     #[test]

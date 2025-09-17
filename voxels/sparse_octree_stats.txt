@@ -1,0 +1,8 @@
+Sparse Voxel Octree Statistics:
+Octree Size: 8
+Max Depth: 6
+Occupied Leaves: 61208
+Total Nodes: 71036
+Memory Usage: 5682880 bytes
+Compression Ratio: N/A
+Compression Savings: N/A%

@@ -65,19 +65,12 @@ pub fn xor<S: Clone + Send + Sync + Debug>(
     rhs: &IndexedMesh<S>,
 ) -> IndexedMesh<S> {
     // XOR = (A ∪ B) - (A ∩ B)
-    // Perform all operations in Mesh space to avoid conversion errors
-    let lhs_mesh = lhs.to_mesh();
-    let rhs_mesh = rhs.to_mesh();
+    // Use indexed mesh operations to maintain efficiency and avoid unnecessary conversions
+    let union_mesh = union(lhs, rhs);
+    let intersection_mesh = intersection(lhs, rhs);
 
-    // Compute union and intersection directly in Mesh space
-    let union_mesh = lhs_mesh.union(&rhs_mesh);
-    let intersection_mesh = lhs_mesh.intersection(&rhs_mesh);
-
-    // Perform XOR as union minus intersection
-    let xor_mesh = union_mesh.difference(&intersection_mesh);
-
-    // Convert back to IndexedMesh with proper deduplication
-    IndexedMesh::from(xor_mesh)
+    // Perform XOR as union minus intersection using indexed mesh operations
+    difference(&union_mesh, &intersection_mesh)
 }
 
 /// Transform operation for IndexedMesh
@@ -1430,7 +1423,7 @@ mod tests {
         );
 
         // Each face should have adjacent faces (allowing for 0 in some cases due to mesh complexity)
-        for (_i, face_adjacents) in union_adjacency.face_adjacency.iter().enumerate() {
+        for face_adjacents in union_adjacency.face_adjacency.iter() {
             // For complex meshes, some faces might have no adjacent faces if they're isolated
             // This is acceptable as long as the adjacency structure is valid
             // Vector length is inherently non-negative - no assertion needed
@@ -1507,7 +1500,7 @@ mod tests {
         // For degenerate geometry, union might be empty or contain minimal valid geometry
         // The important thing is that operations complete without panicking
         assert!(
-            union_result.vertices.is_empty() || union_result.vertices.len() >= 1,
+            union_result.vertices.is_empty() || !union_result.vertices.is_empty(),
             "Union should either be empty or contain valid vertices"
         );
         // Difference vertex count is inherently non-negative - no assertion needed

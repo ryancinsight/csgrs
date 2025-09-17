@@ -1,0 +1,36 @@
+[package]
+name = "csgrs-fuzz"
+version = "0.0.0"
+publish = false
+edition = "2024"
+
+[package.metadata]
+cargo-fuzz = true
+
+[dependencies]
+libfuzzer-sys = "0.4"
+arbitrary = "1.0"
+
+[dependencies.csgrs]
+path = ".."
+
+[[bin]]
+name = "fuzz_target_1"
+path = "fuzz_targets/fuzz_target_1.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "mesh_transformations"
+path = "fuzz_targets/mesh_transformations.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "shape_creation"
+path = "fuzz_targets/shape_creation.rs"
+test = false
+doc = false
+bench = false

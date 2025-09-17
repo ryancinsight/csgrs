@@ -1,0 +1,6 @@
+Sphere Voxelization Statistics:
+Original Mesh Polygons: 128
+Voxel Grid Size: 16x16x16
+Voxel Size: 0.2
+Occupied Voxels: 1648
+Occupancy Ratio: 40.23%
