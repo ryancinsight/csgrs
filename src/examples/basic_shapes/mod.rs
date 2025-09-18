@@ -4,6 +4,7 @@
 //! including cubes, spheres, and cylinders.
 
 use crate::mesh::Mesh;
+use crate::traits::CSG;
 use std::fs;
 
 type MeshType = Mesh<()>;
@@ -166,8 +167,33 @@ pub fn run_voxel_grid_demo() -> Result<(), Box<dyn std::error::Error>> {
 
     // 3) Voxelize a sphere mesh for comparison
     if let Ok(sphere_mesh) = MeshType::sphere(1.5, 16, 8, None) {
+        println!("Sphere mesh created with {} polygons", sphere_mesh.polygons.len());
+
+        // Check if sphere mesh vertices are actually spherical
+        let mut min_radius = f64::INFINITY;
+        let mut max_radius = 0.0f64;
+        for polygon in &sphere_mesh.polygons {
+            for vertex in &polygon.vertices {
+                let radius = vertex.pos.coords.norm();
+                min_radius = min_radius.min(radius);
+                max_radius = max_radius.max(radius);
+            }
+        }
+        println!("Sphere vertex radii: min={:.3}, max={:.3} (expected ~1.5)", min_radius, max_radius);
+
+        let bbox = sphere_mesh.bounding_box();
+        println!("Sphere bounding box: [{:.2}, {:.2}, {:.2}] to [{:.2}, {:.2}, {:.2}]",
+            bbox.mins.x, bbox.mins.y, bbox.mins.z,
+            bbox.maxs.x, bbox.maxs.y, bbox.maxs.z);
+
         let mut sphere_voxelized_grid =
             VoxelGrid::from_mesh_bounds(&sphere_mesh, 0.2, 0.1, None);
+
+        println!("Voxel grid dimensions: {}x{}x{} (size: {:.2})",
+            sphere_voxelized_grid.dimensions.0,
+            sphere_voxelized_grid.dimensions.1,
+            sphere_voxelized_grid.dimensions.2,
+            sphere_voxelized_grid.voxel_size);
 
         let config = VoxelizationConfig {
             mode: VoxelizationMode::Solid,
@@ -175,7 +201,14 @@ pub fn run_voxel_grid_demo() -> Result<(), Box<dyn std::error::Error>> {
             parallel: false,
         };
 
+        // Debug: Check some basic properties
+        println!("Sphere has {} polygons", sphere_mesh.polygons.len());
+
         let sphere_occupied_count = sphere_voxelized_grid.voxelize_mesh(&sphere_mesh, &config);
+        println!("Sphere voxelization completed: {} occupied voxels out of {} total",
+            sphere_occupied_count,
+            sphere_voxelized_grid.dimensions.0 * sphere_voxelized_grid.dimensions.1 * sphere_voxelized_grid.dimensions.2);
+
         let sphere_voxelized_mesh = sphere_voxelized_grid.to_mesh(None);
 
         #[cfg(feature = "stl-io")]
@@ -393,7 +426,7 @@ pub fn run_voxel_csg_demo() -> Result<(), Box<dyn std::error::Error>> {
                 let point = Point3::new(
                     min_bound + x as f64 * step,
                     min_bound + y as f64 * step,
-                    min_bound + z as f64 * step
+                    min_bound + z as f64 * step,
                 );
 
                 let dist1 = (point - center1).norm();

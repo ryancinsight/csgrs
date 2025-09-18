@@ -56,6 +56,13 @@ pub mod voxels;
 #[cfg(feature = "simd")]
 pub mod simd;
 
+// GPU acceleration for indexed mesh operations (optional feature)
+#[cfg(feature = "gpu")]
+pub mod gpu;
+
+// Procedural generation and mesh synthesis algorithms (temporarily disabled)
+// pub mod procedural;
+
 // Note: delaunay and earcut features can both be enabled, but delaunay takes precedence
 // This allows --all-features to work while maintaining backward compatibility
 

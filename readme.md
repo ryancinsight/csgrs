@@ -253,17 +253,18 @@ with, `f3d cube_sphere_difference.stl`, and should look like this:
 
 ### Building for WASM
 
-WebAssembly support is available through the `wasm` feature, which provides a minimal feature set optimized for web environments:
+WebAssembly support is partially implemented but currently non-functional due to dependency compatibility issues with random number generation and file I/O libraries. The `wasm` feature is defined but requires resolution of:
+
+- Random number generation dependencies (getrandom, uuid) that don't work in WASM without special configuration
+- File I/O dependencies that require system resources
 
 ```shell
-# Build for WebAssembly
+# WASM support is currently blocked by dependency issues
+# This will fail to compile until dependencies are resolved
 cargo build --features="wasm" --target=wasm32-unknown-unknown --release
-
-# Run WASM examples (when wasm-bindgen feature is enabled)
-cargo run --features="wasm,wasm-bindgen" --bin csgrs-examples -- wasm
 ```
 
-The WASM build excludes dependencies requiring system resources (like DXF file I/O) while maintaining core CSG functionality, SIMD optimizations, and triangulation capabilities.
+The intended WASM build would exclude dependencies requiring system resources (like DXF file I/O) while maintaining core CSG functionality, SIMD optimizations, and triangulation capabilities.
 
 ## Features and Structures
 

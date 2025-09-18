@@ -25,6 +25,9 @@ pub use ply::indexed_mesh_ply;
 #[cfg(feature = "amf-io")]
 mod amf;
 
+// #[cfg(feature = "gltf")]
+// mod gltf;
+
 /// Generic I/O and format‑conversion errors.
 ///
 /// Many I/O features are behind cargo feature‑flags.  
@@ -54,6 +57,10 @@ pub enum IoError {
     #[cfg(feature = "amf-io")]
     /// Error during AMF file processing.
     AmfParsing(String),
+
+    #[cfg(feature = "gltf")]
+    /// Error during glTF file processing.
+    GltfParsing(String),
 }
 
 impl std::fmt::Display for IoError {
@@ -79,6 +86,9 @@ impl std::fmt::Display for IoError {
 
             #[cfg(feature = "amf-io")]
             AmfParsing(error) => write!(f, "AMF Parsing error: {error}"),
+
+            #[cfg(feature = "gltf")]
+            GltfParsing(error) => write!(f, "glTF Parsing error: {error}"),
         }
     }
 }

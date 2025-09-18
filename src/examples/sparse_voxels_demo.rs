@@ -47,7 +47,11 @@ pub fn demonstrate_sparse_octree() -> Result<(), Box<dyn std::error::Error>> {
     }
 
     let elapsed = start_time.elapsed();
-    println!("  - Added {} voxels in {:.3}ms", occupied_count, elapsed.as_secs_f64() * 1000.0);
+    println!(
+        "  - Added {} voxels in {:.3}ms",
+        occupied_count,
+        elapsed.as_secs_f64() * 1000.0
+    );
     println!("  - Final occupied leaves: {}", octree.occupied_leaves);
     println!("  - Final total nodes: {}", octree.total_nodes);
     println!();
@@ -55,8 +59,8 @@ pub fn demonstrate_sparse_octree() -> Result<(), Box<dyn std::error::Error>> {
     // Test voxel retrieval
     println!("Testing voxel retrieval:");
     let test_points = vec![
-        Point3::new(1.0, 1.0, 1.0), // Should be occupied
-        Point3::new(5.0, 5.0, 5.0), // Should be unoccupied
+        Point3::new(1.0, 1.0, 1.0),  // Should be occupied
+        Point3::new(5.0, 5.0, 5.0),  // Should be unoccupied
         Point3::new(-1.0, 0.0, 0.0), // Out of bounds
     ];
 
@@ -72,8 +76,10 @@ pub fn demonstrate_sparse_octree() -> Result<(), Box<dyn std::error::Error>> {
     println!("  - Total nodes: {}", stats.node_count);
     println!("  - Occupied leaves: {}", stats.occupied_leaves);
     println!("  - Memory usage: {} bytes", stats.memory_usage_bytes);
-    println!("  - Compression ratio: {:.2}",
-             stats.compression_ratio.unwrap_or(1.0));
+    println!(
+        "  - Compression ratio: {:.2}",
+        stats.compression_ratio.unwrap_or(1.0)
+    );
     println!();
 
     Ok(())
@@ -107,14 +113,20 @@ pub fn demonstrate_dag_compression() -> Result<(), Box<dyn std::error::Error>> {
     let stats2 = octree2.memory_stats();
 
     println!("Compression results:");
-    println!("  - Octree 1 nodes: {} (canonical: {})",
-             octree1.total_nodes,
-             stats1.compression_ratio.unwrap_or(1.0) * octree1.total_nodes as Real);
-    println!("  - Octree 2 nodes: {} (canonical: {})",
-             octree2.total_nodes,
-             stats2.compression_ratio.unwrap_or(1.0) * octree2.total_nodes as Real);
-    println!("  - Memory savings: {:.1}%",
-             (1.0 - stats1.compression_ratio.unwrap_or(1.0)) * 100.0);
+    println!(
+        "  - Octree 1 nodes: {} (canonical: {})",
+        octree1.total_nodes,
+        stats1.compression_ratio.unwrap_or(1.0) * octree1.total_nodes as Real
+    );
+    println!(
+        "  - Octree 2 nodes: {} (canonical: {})",
+        octree2.total_nodes,
+        stats2.compression_ratio.unwrap_or(1.0) * octree2.total_nodes as Real
+    );
+    println!(
+        "  - Memory savings: {:.1}%",
+        (1.0 - stats1.compression_ratio.unwrap_or(1.0)) * 100.0
+    );
     println!();
 
     // Test that identical subtrees are deduplicated
@@ -124,8 +136,10 @@ pub fn demonstrate_dag_compression() -> Result<(), Box<dyn std::error::Error>> {
         println!("DAG Registry statistics:");
         println!("  - Registry 1 canonical nodes: {}", reg1_size);
         println!("  - Registry 2 canonical nodes: {}", reg2_size);
-        println!("  - Shared canonical nodes: {} (identical subtrees deduplicated)",
-                 reg1_size.min(reg2_size));
+        println!(
+            "  - Shared canonical nodes: {} (identical subtrees deduplicated)",
+            reg1_size.min(reg2_size)
+        );
         println!();
     }
 
@@ -183,11 +197,13 @@ pub fn demonstrate_csg_operations() -> Result<(), Box<dyn std::error::Error>> {
     println!("CSG Operation Results:");
     for (name, result) in operations {
         let stats = result.memory_stats();
-        println!("  - {}: {} voxels, {} nodes, {:.1} KB",
-                 name,
-                 result.occupied_leaves,
-                 result.total_nodes,
-                 stats.memory_usage_bytes as f64 / 1024.0);
+        println!(
+            "  - {}: {} voxels, {} nodes, {:.1} KB",
+            name,
+            result.occupied_leaves,
+            result.total_nodes,
+            stats.memory_usage_bytes as f64 / 1024.0
+        );
     }
     println!();
 
@@ -203,7 +219,14 @@ pub fn demonstrate_conversion() -> Result<(), Box<dyn std::error::Error>> {
     let mesh_cube = Mesh::<()>::cube(4.0, None)?;
     println!("Original mesh cube:");
     println!("  - Polygons: {}", mesh_cube.polygons.len());
-    println!("  - Vertices: {}", mesh_cube.polygons.iter().map(|p| p.vertices.len()).sum::<usize>());
+    println!(
+        "  - Vertices: {}",
+        mesh_cube
+            .polygons
+            .iter()
+            .map(|p| p.vertices.len())
+            .sum::<usize>()
+    );
     println!();
 
     // Convert mesh to sparse voxels
@@ -217,7 +240,14 @@ pub fn demonstrate_conversion() -> Result<(), Box<dyn std::error::Error>> {
     let mesh_from_voxels = voxel_cube.to_mesh();
     println!("Converted back to mesh:");
     println!("  - Polygons: {}", mesh_from_voxels.polygons.len());
-    println!("  - Vertices: {}", mesh_from_voxels.polygons.iter().map(|p| p.vertices.len()).sum::<usize>());
+    println!(
+        "  - Vertices: {}",
+        mesh_from_voxels
+            .polygons
+            .iter()
+            .map(|p| p.vertices.len())
+            .sum::<usize>()
+    );
     println!();
 
     // Test indexed mesh conversion
@@ -226,10 +256,16 @@ pub fn demonstrate_conversion() -> Result<(), Box<dyn std::error::Error>> {
     let indexed_from_voxels = voxel_from_indexed.to_indexed_mesh();
 
     println!("Indexed mesh roundtrip:");
-    println!("  - Original indexed mesh: {} faces, {} vertices",
-             indexed_cube.faces.len(), indexed_cube.vertices.len());
-    println!("  - After voxel conversion: {} faces, {} vertices",
-             indexed_from_voxels.faces.len(), indexed_from_voxels.vertices.len());
+    println!(
+        "  - Original indexed mesh: {} faces, {} vertices",
+        indexed_cube.faces.len(),
+        indexed_cube.vertices.len()
+    );
+    println!(
+        "  - After voxel conversion: {} faces, {} vertices",
+        indexed_from_voxels.faces.len(),
+        indexed_from_voxels.vertices.len()
+    );
     println!();
 
     Ok(())
@@ -272,20 +308,25 @@ pub fn demonstrate_performance() -> Result<(), Box<dyn std::error::Error>> {
         let _stl = mesh.to_stl_ascii("performance_test");
         let stl_time = stl_start.elapsed();
 
-        println!("  - Inserted {} voxels in {:.2}ms ({:.0} voxels/sec)",
-                 count,
-                 insert_time.as_secs_f64() * 1000.0,
-                 count as f64 / insert_time.as_secs_f64());
-        println!("  - Mesh conversion: {:.2}ms ({} polygons)",
-                 mesh_time.as_secs_f64() * 1000.0,
-                 mesh.polygons.len());
-        println!("  - STL export: {:.2}ms",
-                 stl_time.as_secs_f64() * 1000.0);
+        println!(
+            "  - Inserted {} voxels in {:.2}ms ({:.0} voxels/sec)",
+            count,
+            insert_time.as_secs_f64() * 1000.0,
+            count as f64 / insert_time.as_secs_f64()
+        );
+        println!(
+            "  - Mesh conversion: {:.2}ms ({} polygons)",
+            mesh_time.as_secs_f64() * 1000.0,
+            mesh.polygons.len()
+        );
+        println!("  - STL export: {:.2}ms", stl_time.as_secs_f64() * 1000.0);
 
         let stats = octree.memory_stats();
-        println!("  - Memory: {:.1} KB, ratio: {:.2}",
-                 stats.memory_usage_bytes as f64 / 1024.0,
-                 stats.compression_ratio.unwrap_or(1.0));
+        println!(
+            "  - Memory: {:.1} KB, ratio: {:.2}",
+            stats.memory_usage_bytes as f64 / 1024.0,
+            stats.compression_ratio.unwrap_or(1.0)
+        );
         println!();
     }
 
