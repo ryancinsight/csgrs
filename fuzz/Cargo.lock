@@ -335,7 +335,6 @@ dependencies = [
  "nom",
  "num-traits 0.2.19",
  "parry3d-f64",
- "rand",
  "rapier3d-f64",
  "robust",
  "slab",

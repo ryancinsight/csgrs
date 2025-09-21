@@ -3,8 +3,8 @@
 use libfuzzer_sys::fuzz_target;
 use csgrs::mesh::Mesh;
 
-/// Fuzz test for geometric shape creation
-/// Tests various shape constructors with fuzzed parameters
+/// Enhanced fuzz test for geometric shape creation with comprehensive edge case testing
+/// Tests various shape constructors with fuzzed parameters including extreme values
 fuzz_target!(|data: &[u8]| {
     if data.len() < 16 {
         return;
@@ -51,6 +51,21 @@ fuzz_target!(|data: &[u8]| {
         // Mesh should have valid geometry
         assert!(_vertex_count > 0);
         assert!(_face_count > 0);
+
+        // Test mesh validity
+        assert!(mesh.is_valid(), "Mesh should be valid after creation");
+
+        // Test that we can perform operations on the mesh
+        let _translated = mesh.translate(1.0, 1.0, 1.0);
+        let _bbox2 = _translated.bounding_box();
+
+        // Test serialization (basic smoke test)
+        let _stl = mesh.to_stl_ascii("test");
+        let _obj = mesh.to_obj("test");
+
+        // Verify that serialized data is non-empty
+        assert!(!_stl.is_empty());
+        assert!(!_obj.is_empty());
     }
 
     // Result is implicitly validated by not panicking

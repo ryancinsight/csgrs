@@ -199,8 +199,8 @@ mod tests {
             |x, y| x * x + y * y
         );
 
-        assert!(surface.vertices.len() > 0);
-        assert!(surface.faces.len() > 0);
+        assert!(!surface.vertices.is_empty());
+        assert!(!surface.faces.is_empty());
     }
 
     #[test]

@@ -5,9 +5,10 @@
 //! deduplication to minimize memory usage while maintaining topological consistency.
 
 use crate::float_types::{Real, parry3d::bounding_volume::Aabb};
+use crate::geometry; // Use shared geometric utilities
 use crate::mesh::{polygon::Polygon, vertex::Vertex};
 use crate::traits::CSG;
-use nalgebra::{Matrix4, Point3, Vector3, partial_max, partial_min};
+use nalgebra::{Matrix4, Point3, Vector3};
 use std::{cmp::PartialEq, fmt::Debug, sync::OnceLock};
 
 // I/O functionality is now consolidated in the main io module for SSOT compliance
@@ -572,48 +573,26 @@ impl<S: Clone + Send + Sync + Debug> CSG for IndexedMesh<S> {
     }
 
     /// Returns bounding box of the IndexedMesh
+    ///
+    /// # Mathematical Foundation
+    /// Uses the shared geometry utilities for consistent bounding box computation
+    /// across all geometric primitives in the library.
+    ///
+    /// # Algorithm
+    /// - Uses vertex positions directly from the deduplicated vertex array
+    /// - Computes min/max bounds using O(n) linear scan
+    /// - Leverages shared geometry utilities for numerical stability
     fn bounding_box(&self) -> Aabb {
         *self.bounding_box.get_or_init(|| {
-            if self.vertices.is_empty() {
-                return Aabb::new(Point3::origin(), Point3::origin());
-            }
+            // Use shared geometry utilities for consistent bounding box computation
+            let (mins, maxs) = geometry::compute_bounding_box_from_points(
+                &self.vertices.iter().map(|v| v.pos).collect::<Vec<_>>()
+            );
 
-            let mut min_x = Real::MAX;
-            let mut min_y = Real::MAX;
-            let mut min_z = Real::MAX;
-            let mut max_x = -Real::MAX;
-            let mut max_y = -Real::MAX;
-            let mut max_z = -Real::MAX;
-
-            for vertex in &self.vertices {
-                let pos = vertex.pos;
-
-                if let Some(new_min_x) = partial_min(&min_x, &pos.x) {
-                    min_x = *new_min_x;
-                }
-                if let Some(new_min_y) = partial_min(&min_y, &pos.y) {
-                    min_y = *new_min_y;
-                }
-                if let Some(new_min_z) = partial_min(&min_z, &pos.z) {
-                    min_z = *new_min_z;
-                }
-
-                if let Some(new_max_x) = partial_max(&max_x, &pos.x) {
-                    max_x = *new_max_x;
-                }
-                if let Some(new_max_y) = partial_max(&max_y, &pos.y) {
-                    max_y = *new_max_y;
-                }
-                if let Some(new_max_z) = partial_max(&max_z, &pos.z) {
-                    max_z = *new_max_z;
-                }
-            }
-
-            if min_x > max_x {
+            // Handle degenerate case where no vertices exist
+            if mins == maxs {
                 Aabb::new(Point3::origin(), Point3::origin())
             } else {
-                let mins = Point3::new(min_x, min_y, min_z);
-                let maxs = Point3::new(max_x, max_y, max_z);
                 Aabb::new(mins, maxs)
             }
         })

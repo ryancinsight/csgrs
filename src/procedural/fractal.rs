@@ -233,6 +233,6 @@ mod tests {
     fn test_fractal_tree() {
         let tree = fractal_tree(3, 1.0, std::f64::consts::PI / 6.0);
         assert!(tree.vertices.len() > 2);
-        assert!(tree.faces.len() > 0);
+        assert!(!tree.faces.is_empty());
     }
 }

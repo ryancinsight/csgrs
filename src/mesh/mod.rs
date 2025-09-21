@@ -4,11 +4,12 @@ use crate::float_types::{
     Real,
     parry3d::bounding_volume::{Aabb, BoundingVolume},
 };
+use crate::geometry; // Use shared geometric utilities
 use crate::mesh::{bsp::Node, plane::Plane, polygon::Polygon, vertex::Vertex};
 use crate::sketch::Sketch;
 use crate::traits::CSG;
 use geo::{CoordsIter, Geometry, Polygon as GeoPolygon};
-use nalgebra::{Matrix4, Point3, Vector3, partial_max, partial_min};
+use nalgebra::{Matrix4, Point3, Vector3};
 use std::{cmp::PartialEq, fmt::Debug, sync::OnceLock};
 
 pub mod bsp;
@@ -330,51 +331,31 @@ impl<S: Clone + Send + Sync + Debug> CSG for Mesh<S> {
     }
 
     /// Returns an [`Aabb`] indicating the 3D bounds of all `polygons`.
+    ///
+    /// # Mathematical Foundation
+    /// Uses the shared geometry utilities for consistent bounding box computation
+    /// across all geometric primitives in the library.
+    ///
+    /// # Algorithm
+    /// - Collects all vertices from all polygons
+    /// - Computes min/max bounds using O(n) linear scan
+    /// - Returns AABB spanning all geometric elements
     fn bounding_box(&self) -> Aabb {
         *self.bounding_box.get_or_init(|| {
-            // Track overall min/max in x, y, z among all 3D polygons
-            let mut min_x = Real::MAX;
-            let mut min_y = Real::MAX;
-            let mut min_z = Real::MAX;
-            let mut max_x = -Real::MAX;
-            let mut max_y = -Real::MAX;
-            let mut max_z = -Real::MAX;
+            // Use shared geometry utilities for consistent bounding box computation
+            let vertices: Vec<_> = self.polygons
+                .iter()
+                .flat_map(|poly| poly.vertices.iter().map(|v| v.pos))
+                .collect();
 
-            // 1) Gather from the 3D polygons
-            for poly in &self.polygons {
-                for v in &poly.vertices {
-                    // Handle potential NaN values gracefully
-                    if let Some(new_min_x) = partial_min(&min_x, &v.pos.x) {
-                        min_x = *new_min_x;
-                    }
-                    if let Some(new_min_y) = partial_min(&min_y, &v.pos.y) {
-                        min_y = *new_min_y;
-                    }
-                    if let Some(new_min_z) = partial_min(&min_z, &v.pos.z) {
-                        min_z = *new_min_z;
-                    }
+            let (mins, maxs) = geometry::compute_bounding_box_from_points(&vertices);
 
-                    if let Some(new_max_x) = partial_max(&max_x, &v.pos.x) {
-                        max_x = *new_max_x;
-                    }
-                    if let Some(new_max_y) = partial_max(&max_y, &v.pos.y) {
-                        max_y = *new_max_y;
-                    }
-                    if let Some(new_max_z) = partial_max(&max_z, &v.pos.z) {
-                        max_z = *new_max_z;
-                    }
-                }
+            // Handle degenerate case where no vertices exist
+            if mins == maxs {
+                Aabb::new(Point3::origin(), Point3::origin())
+            } else {
+                Aabb::new(mins, maxs)
             }
-
-            // If still uninitialized (e.g., no polygons), return a trivial AABB at origin
-            if min_x > max_x {
-                return Aabb::new(Point3::origin(), Point3::origin());
-            }
-
-            // Build a parry3d Aabb from these min/max corners
-            let mins = Point3::new(min_x, min_y, min_z);
-            let maxs = Point3::new(max_x, max_y, max_z);
-            Aabb::new(mins, maxs)
         })
     }
 

@@ -413,7 +413,7 @@ impl<S: Clone + Debug + Send + Sync + std::hash::Hash + std::cmp::PartialEq> Vox
     }
 
     /// Get complete marching cubes triangle table
-    fn get_marching_cubes_triangles(&self, cube_index: u8) -> [i8; 16] {
+    const fn get_marching_cubes_triangles(&self, cube_index: u8) -> [i8; 16] {
         // Complete marching cubes triangle table with all 256 cases
         // Each case contains up to 5 triangles (15 edge indices) terminated by -1
         // Edge numbering: 0-11 corresponding to cube edges
@@ -799,7 +799,7 @@ mod tests {
 
         // Marching Cubes creates triangles for surface reconstruction
         println!("L-shaped voxel mesh has {} triangles", mesh.polygons.len());
-        assert!(mesh.polygons.len() > 0, "Should have triangles for surface reconstruction");
+        assert!(!mesh.polygons.is_empty(), "Should have triangles for surface reconstruction");
 
         // Check that bounding box is reasonable (Marching Cubes may create slightly different bounds)
         let bbox = mesh.bounding_box();
@@ -842,7 +842,7 @@ mod tests {
 
         // Marching Cubes creates triangles for surface reconstruction
         println!("2x2x2 voxel cube mesh has {} triangles", mesh.polygons.len());
-        assert!(mesh.polygons.len() > 0, "Should have triangles for surface reconstruction");
+        assert!(!mesh.polygons.is_empty(), "Should have triangles for surface reconstruction");
 
         // Check that normals are valid for non-degenerate triangles
         let mut valid_triangle_count = 0;

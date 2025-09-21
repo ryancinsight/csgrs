@@ -48,9 +48,19 @@ csgrs provides high-performance Constructive Solid Geometry (CSG) operations for
 
 **Trade-offs**:
 - ✅ **Benefits**: Transparent parallelization for performance scaling
+
+### AD005: IndexedMesh BSP Algorithm Consistency
+**Decision**: IndexedMesh operations use BSP tree algorithms identical to Mesh operations for geometric consistency.
+
+**Rationale**: Ensures mathematical correctness and identical geometric results across all CSG operations. Previously, IndexedMesh used naive vertex deduplication while Mesh used proper BSP trees, leading to different results.
+
+**Trade-offs**:
+- ✅ **Benefits**: Geometric consistency, mathematical correctness, identical STL output
+- ⚠️ **Costs**: Conversion overhead between IndexedMesh and Mesh representations
+- ⚠️ **Complexity**: Requires round-trip conversion for operations (IndexedMesh → Mesh → IndexedMesh)
 - ⚠️ **Costs**: Non-deterministic operation ordering
 
-### AD005: Trait-Based CSG Interface
+### AD006: Trait-Based CSG Interface
 **Decision**: Unified CSG trait for all geometric types (Mesh, Sketch, IndexedMesh).
 
 **Rationale**: Consistent API across different representations, extensible through trait implementations.
@@ -1248,5 +1258,53 @@ pub struct SparseVoxelOctree<S: Clone + Debug + Send + Sync + std::hash::Hash + 
 **Trade-offs**:
 - ✅ **Benefits**: Better performance, reduced memory usage, cleaner code
 - ⚠️ **Costs**: None - Copy trait guarantees equivalent semantics
+
+## Sprint 78: Advanced Feature Implementation (In Progress)
+
+### Professional CAD Integration
+
+#### AD012: STEP (ISO 10303) File Format Support
+**Decision**: Implement comprehensive STEP file format support for professional CAD workflows.
+
+**Rationale**: STEP is the ISO 10303 standard for exchanging product manufacturing information, essential for enterprise CAD integration. Professional CAD/CAM workflows require native STEP support for seamless data exchange between systems.
+
+**Trade-offs**:
+- ✅ **Benefits**: Full compatibility with professional CAD systems (SolidWorks, AutoCAD, CATIA)
+- ✅ **Benefits**: Standardized geometric representation for manufacturing workflows
+- ✅ **Benefits**: Complete geometric entity support (points, curves, surfaces, solids)
+- ⚠️ **Costs**: Complex STEP parsing requires robust EXPRESS schema handling
+- ⚠️ **Costs**: Large codebase addition for comprehensive entity support
+
+**Implementation**:
+- **Entity Support**: CARTESIAN_POINT, DIRECTION, AXIS2_PLACEMENT_3D, PLANE, CIRCLE, LINE
+- **Topological Support**: VERTEX_POINT, EDGE_CURVE, FACE_BOUND, ADVANCED_FACE, CLOSED_SHELL
+- **BREP Support**: MANIFOLD_SOLID_BREP, SOLID_MODEL for complete solid modeling
+- **Feature Flag**: `step-io` for optional compilation
+- **Error Handling**: Comprehensive error types for malformed STEP files
+- **Bidirectional**: Full read/write support with proper entity relationships
+
+**Testing**:
+- Entity creation and validation tests
+- STEP file parsing with malformed data fuzzing
+- Roundtrip conversion testing (STEP → Mesh → STEP)
+- Integration with existing CSG operations
+
+#### AD013: Enhanced SIMD Optimizations
+**Decision**: Extend existing SIMD framework with safe intrinsics for critical geometric operations.
+
+**Rationale**: Building on existing SIMD foundation, safe intrinsics provide additional performance gains while maintaining memory safety guarantees.
+
+**Trade-offs**:
+- ✅ **Benefits**: 2-4x performance improvements for vectorizable operations
+- ✅ **Benefits**: Zero unsafe code while achieving near-intrinsic performance
+- ✅ **Benefits**: Fallback mechanisms ensure compatibility across all platforms
+- ⚠️ **Costs**: Requires careful implementation to maintain numerical stability
+- ⚠️ **Costs**: Additional testing complexity for SIMD-specific edge cases
+
+**Performance Characteristics**:
+- **SIMD Vectorization**: Enhanced Point3/Vector3 operations with wider registers
+- **Memory Pool Allocation**: Optimized memory management for SIMD operations
+- **Cache Efficiency**: Improved memory access patterns for vectorized computations
+- **Precision Maintenance**: Full numerical accuracy preservation across all SIMD operations
 
 ## Sprint 75: Sparse Voxel Architecture Analysis & RefCell Resolution Strategy (In Progress)

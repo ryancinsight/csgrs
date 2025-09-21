@@ -48,5 +48,19 @@ fuzz_target!(|data: &[u8]| {
     // Test bounding box after transformations
     let _bbox = _complex.bounding_box();
 
+    // Test that mesh remains valid after transformations
+    assert!(_translated.is_valid());
+    assert!(_rotated.is_valid());
+    assert!(_scaled.is_valid());
+    assert!(_complex.is_valid());
+
+    // Test serialization of transformed meshes
+    let _stl = _complex.to_stl_ascii("test");
+    let _obj = _complex.to_obj("test");
+
+    // Verify serialization works on transformed meshes
+    assert!(!_stl.is_empty());
+    assert!(!_obj.is_empty());
+
     // All operations should complete without panicking
 });

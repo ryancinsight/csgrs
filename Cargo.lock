@@ -1271,6 +1271,7 @@ dependencies = [
  "tracing-subscriber",
  "ttf-parser",
  "ttf-parser-utils",
+ "uuid",
  "wasm-bindgen",
  "wgpu",
  "wgpu-types 24.0.0",

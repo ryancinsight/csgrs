@@ -178,8 +178,8 @@ mod tests {
             |u, v| (u.cos() * v.cos(), u.cos() * v.sin(), u.sin())
         );
 
-        assert!(surface.vertices.len() > 0);
-        assert!(surface.faces.len() > 0);
+        assert!(!surface.vertices.is_empty());
+        assert!(!surface.faces.is_empty());
         assert_eq!(surface.vertices.len(), 81); // (8+1) * (8+1)
     }
 

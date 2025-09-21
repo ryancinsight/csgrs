@@ -520,8 +520,8 @@ mod tests {
 
                 // Test that result has reasonable vertex/face counts
                 let result_mesh = result.unwrap();
-                assert!(result_mesh.vertices.len() > 0);
-                assert!(result_mesh.faces.len() > 0);
+                assert!(!result_mesh.vertices.is_empty());
+                assert!(!result_mesh.faces.is_empty());
             },
             Err(GpuError::NotAvailable(_)) => {
                 // Expected on systems without GPU

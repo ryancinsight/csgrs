@@ -45,6 +45,7 @@
 pub mod errors;
 pub mod examples;
 pub mod float_types;
+pub mod geometry; // New shared geometric utilities
 pub mod indexed_mesh;
 pub mod io;
 pub mod mesh;

@@ -84,8 +84,6 @@ stl_io = { version = "0.8", optional = true }
 image = { version = "0.25", optional = true }
 svg = { version = "0.18", optional = true }
 nom = { version = "7.1", optional = true }
-dxf = { version = "0.6", optional = true }
-
 # font
 ttf-utils = { version = "0.1", optional = true, package = "ttf-parser-utils"}
 ttf-parser = { version = "0.25", optional = true }
@@ -93,16 +91,16 @@ hershey = { version = "0.1.2", optional = true }
 
 doc-image-embed = "0.2.1"
 
-# wasm
-[target.'cfg(any(target_arch = "wasm32", target_arch = "wasm64"))'.dependencies]
-wasm-bindgen = { version = "0.2", optional = true }
-
 # WASM-specific overrides to exclude incompatible dependencies
 dxf = { version = "0.6", optional = true, default-features = false }
 
+[target.'cfg(any(target_arch = "wasm32", target_arch = "wasm64"))'.dependencies]
+wasm-bindgen = { version = "0.2", optional = true }
+uuid = { version = "1.18", optional = true, default-features = false, features = ["js"] }
+
 [features]
-default = ["f64", "stl-io", "dxf-io", "obj-io", "ply-io", "amf-io", "chull-io", "image-io", "metaballs", "sdf", "offset", "delaunay", "truetype-text", "hershey-text", "simd"]
-wasm = ["f64", "stl-io", "obj-io", "ply-io", "amf-io", "metaballs", "sdf", "truetype-text", "hershey-text", "simd", "earcut", "wasm-bindgen"]
+default = ["f64", "stl-io", "dxf-io", "obj-io", "ply-io", "amf-io", "step-io", "chull-io", "image-io", "metaballs", "sdf", "offset", "delaunay", "truetype-text", "hershey-text", "simd"]
+wasm = ["f64", "stl-io", "obj-io", "ply-io", "amf-io", "metaballs", "sdf", "truetype-text", "hershey-text", "simd", "earcut", "wasm-bindgen", "uuid"]
 parallel = [
   "rayon",
   "geo/multithreading",
@@ -142,6 +140,10 @@ ply-io = [
 ]
 amf-io = [
   # AMF format support - no external dependencies needed
+]
+
+step-io = [
+  # STEP (ISO 10303) format support - no external dependencies needed
 ]
 truetype-text = [
   "ttf-parser",

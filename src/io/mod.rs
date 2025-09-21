@@ -25,6 +25,12 @@ pub use ply::indexed_mesh_ply;
 #[cfg(feature = "amf-io")]
 mod amf;
 
+#[cfg(feature = "step-io")]
+mod step;
+
+#[cfg(feature = "step-io")]
+pub use step::{StepModel, StepError, StepEntity, CartesianPoint, Direction, Axis2Placement3D, EntityId};
+
 // #[cfg(feature = "gltf")]
 // mod gltf;
 
@@ -58,6 +64,10 @@ pub enum IoError {
     /// Error during AMF file processing.
     AmfParsing(String),
 
+    #[cfg(feature = "step-io")]
+    /// Error during STEP file processing.
+    StepParsing(String),
+
     #[cfg(feature = "gltf")]
     /// Error during glTF file processing.
     GltfParsing(String),
@@ -87,6 +97,9 @@ impl std::fmt::Display for IoError {
             #[cfg(feature = "amf-io")]
             AmfParsing(error) => write!(f, "AMF Parsing error: {error}"),
 
+            #[cfg(feature = "step-io")]
+            StepParsing(error) => write!(f, "STEP Parsing error: {error}"),
+
             #[cfg(feature = "gltf")]
             GltfParsing(error) => write!(f, "glTF Parsing error: {error}"),
         }
@@ -114,9 +127,5 @@ impl From<::svg::parser::Error> for IoError {
     }
 }
 
-#[cfg(feature = "obj-io")]
-impl From<String> for IoError {
-    fn from(value: String) -> Self {
-        Self::ObjParsing(value)
-    }
-}
+// Generic From<String> implementation removed to avoid conflicts
+// Use specific error types instead: IoError::ObjParsing(String) or IoError::StepParsing(String)
