@@ -3,7 +3,7 @@
 //! This module provides efficient algorithms for analyzing mesh connectivity,
 //! including vertex adjacency, face adjacency, and topological queries.
 
-use crate::indexed_mesh::IndexedMesh;
+use crate::indexed_mesh::{IndexedMesh, AdjacencyInfo};
 use std::{collections::HashSet, fmt::Debug};
 
 /// Analyze manifold properties of the mesh
@@ -303,6 +303,81 @@ pub fn find_adjacent_faces<S: Clone + Send + Sync + Debug>(
     }
 
     adjacent_faces.into_iter().collect()
+}
+
+/// Compute complete adjacency information for the mesh
+pub fn compute_adjacency<S: Clone + Send + Sync + Debug>(mesh: &IndexedMesh<S>) -> AdjacencyInfo {
+    use std::collections::HashMap;
+
+    let num_vertices = mesh.vertices.len();
+    let num_faces = mesh.faces.len();
+
+    let mut vertex_adjacency = vec![Vec::new(); num_vertices];
+    let mut vertex_faces = vec![Vec::new(); num_vertices];
+    let mut face_adjacency = vec![Vec::new(); num_faces];
+    let mut face_vertices = vec![Vec::new(); num_faces];
+
+    // Build vertex-to-face mapping and face-to-vertex mapping
+    for (face_idx, face) in mesh.faces.iter().enumerate() {
+        face_vertices[face_idx] = face.vertices.clone();
+        for &vertex_idx in &face.vertices {
+            if vertex_idx < num_vertices {
+                vertex_faces[vertex_idx].push(face_idx);
+            }
+        }
+    }
+
+    // Build vertex adjacency (vertices sharing faces - more comprehensive than just edge sharing)
+    for (vertex_idx, faces) in vertex_faces.iter().enumerate() {
+        let mut adjacent_vertices = std::collections::HashSet::new();
+        for &face_idx in faces {
+            if let Some(face) = mesh.faces.get(face_idx) {
+                for &other_vertex in &face.vertices {
+                    if other_vertex != vertex_idx {
+                        adjacent_vertices.insert(other_vertex);
+                    }
+                }
+            }
+        }
+        vertex_adjacency[vertex_idx] = adjacent_vertices.into_iter().collect();
+    }
+
+    // Build face adjacency (faces sharing edges)
+    let mut edge_face_map: HashMap<(usize, usize), Vec<usize>> = HashMap::new();
+
+    for (face_idx, face) in mesh.faces.iter().enumerate() {
+        let vertices = &face.vertices;
+        for i in 0..vertices.len() {
+            let v1 = vertices[i];
+            let v2 = vertices[(i + 1) % vertices.len()];
+
+            // Canonical edge representation
+            let edge = if v1 < v2 { (v1, v2) } else { (v2, v1) };
+            edge_face_map.entry(edge).or_default().push(face_idx);
+        }
+    }
+
+    // For each edge that has exactly 2 faces, those faces are adjacent
+    for (_edge, faces) in edge_face_map {
+        if faces.len() == 2 {
+            let f1 = faces[0];
+            let f2 = faces[1];
+
+            if !face_adjacency[f1].contains(&f2) {
+                face_adjacency[f1].push(f2);
+            }
+            if !face_adjacency[f2].contains(&f1) {
+                face_adjacency[f2].push(f1);
+            }
+        }
+    }
+
+    AdjacencyInfo {
+        vertex_adjacency,
+        vertex_faces,
+        face_adjacency,
+        face_vertices,
+    }
 }
 
 #[cfg(test)]

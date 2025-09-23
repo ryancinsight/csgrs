@@ -11,23 +11,16 @@ use nalgebra::{Matrix4, Point3};
 use std::fmt::Debug;
 use std::sync::OnceLock;
 
-/// Union operation for IndexedMesh using BSP tree algorithm for consistency with Mesh
+/// Union operation for IndexedMesh using BSP tree algorithm
+/// **ADR AD005 Compliance**: Uses identical BSP algorithm as Mesh operations for geometric consistency
+/// **KNOWN LIMITATION**: Round-trip conversion may produce slightly different results due to vertex reconstruction
+/// **TODO**: Implement native IndexedMesh BSP operations for perfect consistency
 pub fn union<S: Clone + Send + Sync + Debug>(
     lhs: &IndexedMesh<S>,
     rhs: &IndexedMesh<S>,
 ) -> IndexedMesh<S> {
-    // **Performance Optimization**: Use direct implementation for small meshes
-    // This avoids expensive round-trip conversions for simple cases
-    // Threshold chosen based on SRS performance requirements (<200ms for ≤50 vertices)
-    const SMALL_MESH_THRESHOLD: usize = 50;
-
-    // For small meshes, use optimized direct implementation
-    if lhs.vertices.len() <= SMALL_MESH_THRESHOLD && rhs.vertices.len() <= SMALL_MESH_THRESHOLD {
-        return union_direct(lhs, rhs);
-    }
-
-    // For larger meshes, use BSP tree approach for scalability and consistency
-    // Convert to Mesh for BSP tree operations to ensure consistency
+    // **ADR AD005**: Use BSP tree approach for consistency with Mesh operations
+    // Convert to Mesh for BSP tree operations to ensure identical geometric results
     let lhs_mesh = lhs.to_mesh();
     let rhs_mesh = rhs.to_mesh();
 
@@ -38,77 +31,16 @@ pub fn union<S: Clone + Send + Sync + Debug>(
     IndexedMesh::from(union_mesh)
 }
 
-/// Optimized direct union implementation for small meshes
-/// Avoids expensive BSP tree construction and conversions
-fn union_direct<S: Clone + Send + Sync + Debug>(
-    lhs: &IndexedMesh<S>,
-    rhs: &IndexedMesh<S>,
-) -> IndexedMesh<S> {
-    // Early exit: if bounding boxes don't overlap, union = concatenation
-    if let (Some(lhs_bb), Some(rhs_bb)) = (lhs.bounding_box.get(), rhs.bounding_box.get()) {
-        let lhs_mins = lhs_bb.mins.coords;
-        let lhs_maxs = lhs_bb.maxs.coords;
-        let rhs_mins = rhs_bb.mins.coords;
-        let rhs_maxs = rhs_bb.maxs.coords;
 
-        // No overlap - simple concatenation
-        if lhs_maxs.x < rhs_mins.x || rhs_maxs.x < lhs_mins.x ||
-           lhs_maxs.y < rhs_mins.y || rhs_maxs.y < lhs_mins.y ||
-           lhs_maxs.z < rhs_mins.z || rhs_maxs.z < lhs_mins.z {
-            return concatenate_meshes(lhs, rhs);
-        }
-    }
-
-    // Bounding boxes overlap or unavailable - use full BSP approach for correctness
-    // This handles the complex geometric cases that require proper boolean operations
-    let lhs_mesh = lhs.to_mesh();
-    let rhs_mesh = rhs.to_mesh();
-    let union_mesh = lhs_mesh.union(&rhs_mesh);
-    IndexedMesh::from(union_mesh)
-}
-
-/// Simple concatenation of non-overlapping meshes
-/// Much faster than BSP tree operations for disjoint geometry
-fn concatenate_meshes<S: Clone + Send + Sync + Debug>(
-    lhs: &IndexedMesh<S>,
-    rhs: &IndexedMesh<S>,
-) -> IndexedMesh<S> {
-    let mut result = lhs.clone();
-
-    // Offset vertex indices in RHS faces to account for LHS vertices
-    let vertex_offset = lhs.vertices.len();
-    let mut rhs_faces = rhs.faces.clone();
-
-    for face in &mut rhs_faces {
-        for vertex_idx in &mut face.vertices {
-            *vertex_idx += vertex_offset;
-        }
-    }
-
-    // Concatenate vertices and faces
-    result.vertices.extend_from_slice(&rhs.vertices);
-    result.faces.extend(rhs_faces);
-
-    // Invalidate cached data that needs recalculation
-    result.adjacency = OnceLock::new();
-    result.bounding_box = OnceLock::new();
-
-    result
-}
 
 /// Difference operation for IndexedMesh - optimized with early exit for non-intersecting cases
 pub fn difference<S: Clone + Send + Sync + Debug>(
     lhs: &IndexedMesh<S>,
     rhs: &IndexedMesh<S>,
 ) -> IndexedMesh<S> {
-    // Optimized IndexedMesh difference with early exit for non-intersecting cases
-    // This reduces round-trip conversion overhead when meshes don't overlap
-
     // Early exit optimization: if bounding boxes don't overlap, difference = LHS
     // This avoids expensive geometric operations for clearly non-intersecting meshes
     if let (Some(lhs_bb), Some(rhs_bb)) = (lhs.bounding_box.get(), rhs.bounding_box.get()) {
-        // Check if bounding boxes overlap using AABB intersection
-        // Note: This is a conservative check - meshes might not intersect even if AABBs do
         let lhs_mins = lhs_bb.mins.coords;
         let lhs_maxs = lhs_bb.maxs.coords;
         let rhs_mins = rhs_bb.mins.coords;
@@ -123,9 +55,8 @@ pub fn difference<S: Clone + Send + Sync + Debug>(
         }
     }
 
-    // Bounding boxes overlap or unavailable - use Mesh implementation for correctness
-    // Direct IndexedMesh geometric clipping may be implemented in future optimization phases
-
+    // **ADR AD005**: For intersecting geometry, use BSP tree approach for correctness
+    // TODO: Implement native IndexedMesh BSP to resolve consistency issues
     let lhs_mesh = lhs.to_mesh();
     let rhs_mesh = rhs.to_mesh();
     let diff_mesh = lhs_mesh.difference(&rhs_mesh);
@@ -137,9 +68,6 @@ pub fn intersection<S: Clone + Send + Sync + Debug>(
     lhs: &IndexedMesh<S>,
     rhs: &IndexedMesh<S>,
 ) -> IndexedMesh<S> {
-    // Optimized IndexedMesh intersection with early exit for non-intersecting cases
-    // This reduces round-trip conversion overhead when meshes don't overlap
-
     // Early exit optimization: if bounding boxes don't overlap, intersection = empty
     // This avoids expensive geometric operations for clearly non-intersecting meshes
     if let (Some(lhs_bb), Some(rhs_bb)) = (lhs.bounding_box.get(), rhs.bounding_box.get()) {
@@ -157,9 +85,8 @@ pub fn intersection<S: Clone + Send + Sync + Debug>(
         }
     }
 
-    // Bounding boxes overlap or unavailable - use Mesh implementation for correctness
-    // Direct IndexedMesh geometric analysis may be implemented in future optimization phases
-
+    // **ADR AD005**: For potentially intersecting geometry, use BSP tree approach for correctness
+    // TODO: Implement native IndexedMesh BSP to resolve consistency issues
     let lhs_mesh = lhs.to_mesh();
     let rhs_mesh = rhs.to_mesh();
     let intersection_mesh = lhs_mesh.intersection(&rhs_mesh);
@@ -1534,7 +1461,7 @@ mod tests {
         );
 
         let union_topo = union(&cube, &sphere_mesh);
-        let union_adjacency = union_topo.compute_adjacency();
+        let union_adjacency = union_topo.adjacency();
 
         // Verify adjacency information is consistent
         assert_eq!(

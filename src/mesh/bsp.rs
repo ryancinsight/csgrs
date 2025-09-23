@@ -157,12 +157,19 @@ impl<S: Clone + Send + Sync + Debug> Node<S> {
     /// Remove all polygons in this BSP tree that are inside the other BSP tree
     #[cfg(not(feature = "parallel"))]
     pub fn clip_to(&mut self, bsp: &Node<S>) {
-        self.polygons = bsp.clip_polygons(&self.polygons);
-        if let Some(ref mut front) = self.front {
-            front.clip_to(bsp);
-        }
-        if let Some(ref mut back) = self.back {
-            back.clip_to(bsp);
+        // Use iterative approach to avoid stack overflow on deep BSP trees
+        let mut stack = vec![self];
+
+        while let Some(node) = stack.pop() {
+            node.polygons = bsp.clip_polygons(&node.polygons);
+
+            // Add children to stack for processing
+            if let Some(ref mut front) = node.front {
+                stack.push(front.as_mut());
+            }
+            if let Some(ref mut back) = node.back {
+                stack.push(back.as_mut());
+            }
         }
     }
 
@@ -185,9 +192,23 @@ impl<S: Clone + Send + Sync + Debug> Node<S> {
         result
     }
 
-    /// Build a BSP tree from the given polygons
+    /// Build a BSP tree from the given polygons with recursion depth limit to prevent stack overflow
     #[cfg(not(feature = "parallel"))]
     pub fn build(&mut self, polygons: &[Polygon<S>]) {
+        self.build_with_depth_limit(polygons, 0);
+    }
+
+    /// Build BSP tree with depth limit to prevent stack overflow
+    #[cfg(not(feature = "parallel"))]
+    fn build_with_depth_limit(&mut self, polygons: &[Polygon<S>], depth: usize) {
+        // Prevent excessive recursion that could cause stack overflow
+        const MAX_DEPTH: usize = 100;
+        if depth > MAX_DEPTH {
+            // At maximum depth, store all polygons at this leaf node
+            self.polygons.extend_from_slice(polygons);
+            return;
+        }
+
         if polygons.is_empty() {
             return;
         }
@@ -221,13 +242,13 @@ impl<S: Clone + Send + Sync + Debug> Node<S> {
         if !front.is_empty() {
             self.front
                 .get_or_insert_with(|| Box::new(Node::new()))
-                .build(&front);
+                .build_with_depth_limit(&front, depth + 1);
         }
 
         if !back.is_empty() {
             self.back
                 .get_or_insert_with(|| Box::new(Node::new()))
-                .build(&back);
+                .build_with_depth_limit(&back, depth + 1);
         }
     }
 

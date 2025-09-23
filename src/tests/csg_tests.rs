@@ -259,11 +259,13 @@ fn test_csg_cylinder() {
     assert!(!cylinder.polygons.is_empty());
 
     let bb = cylinder.bounding_box();
-    // Should extend from -radius to +radius in X and Y, and 0 to height in Z
+    // Should extend from -radius to +radius in X and Z, and -height/2 to +height/2 in Y (centered at origin)
     assert!(bb.mins.x <= -0.9);
     assert!(bb.maxs.x >= 0.9);
-    assert!(bb.mins.z <= 0.1); // Should start near 0
-    assert!(bb.maxs.z >= 1.9); // Should end near height (2.0)
+    assert!(bb.mins.y <= -0.9); // Should start near -height/2 (-1.0)
+    assert!(bb.maxs.y >= 0.9); // Should end near +height/2 (1.0)
+    assert!(bb.mins.z <= -0.9);
+    assert!(bb.maxs.z >= 0.9);
 }
 
 #[test]

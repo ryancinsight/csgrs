@@ -1,6 +1,11 @@
 # Cargo configuration for Windows GNU toolchain linker fixes
 # Addresses the "export ordinal too large" error when building/testing
 
+[build]
+rustflags = [
+  "-C", "link-arg=-fuse-ld=lld",
+]
+
 [target.x86_64-pc-windows-gnu]
 rustflags = [
     # Disable stdcall fixup to reduce symbol table size

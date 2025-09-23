@@ -239,3 +239,296 @@ impl<S: Clone + Send + Sync + Debug> IndexedMesh<S> {
         (vertices, indices)
     }
 }
+
+impl<S: Clone + Send + Sync + Debug> From<crate::mesh::Mesh<S>> for super::core::IndexedMesh<S> {
+    /// Convert standard Mesh to IndexedMesh with automatic deduplication
+    fn from(mesh: crate::mesh::Mesh<S>) -> Self {
+        use super::core::{DEDUP_EPSILON, IndexedFace, IndexedMesh};
+        use crate::mesh::vertex::Vertex;
+
+        let mut vertices = Vec::new();
+        let mut faces = Vec::new();
+
+        // Extract all vertices and build face indices
+        for polygon in &mesh.polygons {
+            let mut face_indices = Vec::new();
+
+            for vertex in &polygon.vertices {
+                // Find existing vertex or add new one
+                let vertex_idx = vertices
+                    .iter()
+                    .position(|v: &Vertex| (v.pos - vertex.pos).norm() < DEDUP_EPSILON);
+
+                let vertex_idx = match vertex_idx {
+                    Some(idx) => idx,
+                    None => {
+                        vertices.push(*vertex);
+                        vertices.len() - 1
+                    },
+                };
+
+                face_indices.push(vertex_idx);
+            }
+
+            // Use polygon plane normal for geometric consistency with Mesh operations
+            // This ensures IndexedMesh operations produce identical results to Mesh operations
+            let face_normal = if face_indices.len() >= 3 {
+                let plane_normal = polygon.plane.normal();
+                let length = plane_normal.norm();
+                if length > DEDUP_EPSILON {
+                    Some(plane_normal / length)
+                } else {
+                    None
+                }
+            } else {
+                None
+            };
+
+            let indexed_face = IndexedFace {
+                vertices: face_indices,
+                normal: face_normal,
+                metadata: None,
+            };
+            faces.push(indexed_face);
+        }
+
+        let mut indexed_mesh = IndexedMesh {
+            vertices,
+            faces,
+            adjacency: std::sync::OnceLock::new(),
+            bounding_box: std::sync::OnceLock::new(),
+            metadata: mesh.metadata,
+        };
+
+        // Compute face normals for faces that don't have them
+        indexed_mesh.compute_face_normals_fallback();
+
+        indexed_mesh
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::mesh::{polygon::Polygon, Mesh, vertex::Vertex};
+    use nalgebra::Point3;
+
+    #[test]
+    fn test_conversion_roundtrip_mesh_to_indexed() {
+        // Test roundtrip conversion: Mesh -> IndexedMesh -> Mesh
+        let original_mesh = Mesh::cube(2.0, None::<()>).unwrap();
+
+        // Convert Mesh to IndexedMesh
+        let indexed: IndexedMesh<()> = original_mesh.clone().into();
+
+        // Verify IndexedMesh properties
+        assert!(!indexed.vertices.is_empty(), "IndexedMesh should have vertices");
+        assert!(!indexed.faces.is_empty(), "IndexedMesh should have faces");
+        assert!(indexed.validate_face_indices().is_ok(), "IndexedMesh should be valid");
+
+        // Convert back to Mesh
+        let back_to_mesh = indexed.to_mesh();
+
+        // Verify roundtrip preserves validity
+        assert!(!back_to_mesh.polygons.is_empty(), "Roundtrip mesh should have polygons");
+        assert!(back_to_mesh.polygons.len() >= original_mesh.polygons.len(),
+            "Roundtrip should preserve or increase polygon count due to triangulation");
+    }
+
+    #[test]
+    fn test_conversion_complex_geometry() {
+        // Test conversion with complex geometry (sphere)
+        let sphere_mesh = Mesh::sphere(1.0, 8, 6, None::<()>).unwrap();
+
+        // Check that vertex deduplication occurred (sphere has many duplicate vertices)
+        let original_vertex_count: usize = sphere_mesh.polygons.iter()
+            .map(|p| p.vertices.len())
+            .sum();
+
+        // Convert to IndexedMesh
+        let indexed: IndexedMesh<()> = sphere_mesh.into();
+
+        // Verify properties
+        assert!(!indexed.vertices.is_empty(), "Sphere should convert to vertices");
+        assert!(!indexed.faces.is_empty(), "Sphere should convert to faces");
+        assert!(indexed.validate_face_indices().is_ok(), "Sphere conversion should be valid");
+        assert!(indexed.vertices.len() < original_vertex_count,
+            "IndexedMesh should deduplicate vertices: {} < {}",
+            indexed.vertices.len(), original_vertex_count);
+    }
+
+    #[test]
+    fn test_conversion_with_metadata() {
+        // Test conversion preserves metadata
+        #[derive(Clone, Debug, PartialEq)]
+        struct TestMetadata {
+            id: u32,
+            name: String,
+        }
+
+        let mesh = Mesh::cube(1.0, Some(TestMetadata {
+            id: 42,
+            name: "test_cube".to_string(),
+        })).unwrap();
+
+        let indexed: IndexedMesh<TestMetadata> = mesh.into();
+
+        // Verify metadata is preserved
+        assert_eq!(indexed.metadata.as_ref().unwrap().id, 42);
+        assert_eq!(indexed.metadata.as_ref().unwrap().name, "test_cube");
+    }
+
+    #[test]
+    fn test_conversion_empty_mesh() {
+        // Test conversion of empty mesh
+        let empty_mesh = crate::mesh::Mesh::<()> {
+            polygons: Vec::new(),
+            bounding_box: std::sync::OnceLock::new(),
+            metadata: None,
+        };
+
+        let indexed: IndexedMesh<()> = empty_mesh.into();
+
+        // Empty mesh should convert to empty IndexedMesh
+        assert!(indexed.vertices.is_empty(), "Empty mesh should convert to empty IndexedMesh vertices");
+        assert!(indexed.faces.is_empty(), "Empty mesh should convert to empty IndexedMesh faces");
+        assert!(indexed.validate_face_indices().is_ok(), "Empty IndexedMesh should be valid");
+    }
+
+    #[test]
+    fn test_conversion_degenerate_polygons() {
+        // Test conversion handles degenerate polygons gracefully
+        let mesh = crate::mesh::Mesh::<()> {
+            polygons: vec![
+                // Valid triangle
+                Polygon::new(vec![
+                    Vertex::new(Point3::new(0.0, 0.0, 0.0), nalgebra::Vector3::z()),
+                    Vertex::new(Point3::new(1.0, 0.0, 0.0), nalgebra::Vector3::z()),
+                    Vertex::new(Point3::new(0.0, 1.0, 0.0), nalgebra::Vector3::z()),
+                ], None),
+                // Degenerate polygon (single vertex)
+                Polygon::new(vec![
+                    Vertex::new(Point3::new(2.0, 2.0, 2.0), nalgebra::Vector3::z()),
+                ], None),
+            ],
+            bounding_box: std::sync::OnceLock::new(),
+            metadata: None,
+        };
+
+        let indexed: IndexedMesh<()> = mesh.into();
+
+        // Should handle degenerate polygons gracefully
+        assert!(indexed.validate_face_indices().is_ok(), "Conversion should handle degenerate polygons");
+        // At least the valid triangle should be converted
+        assert!(indexed.vertices.len() >= 3, "Should convert valid vertices");
+    }
+
+    #[test]
+    fn test_conversion_preserves_face_normals() {
+        // Test that face normals are computed when missing
+        let cube_mesh = Mesh::cube(1.0, None::<()>).unwrap();
+        let indexed: IndexedMesh<()> = cube_mesh.into();
+
+        // All faces should have normals after conversion
+        for face in &indexed.faces {
+            assert!(face.normal.is_some(), "All faces should have normals after conversion");
+            let normal = face.normal.unwrap();
+            assert!(normal.norm() > 0.99, "Face normal should be unit length: {}", normal.norm());
+        }
+    }
+
+    #[test]
+    fn test_conversion_vertex_deduplication() {
+        // Test that vertex deduplication works correctly
+        let mesh = crate::mesh::Mesh::<()> {
+            polygons: vec![
+                // Two triangles sharing vertices
+                Polygon::new(vec![
+                    Vertex::new(Point3::new(0.0, 0.0, 0.0), nalgebra::Vector3::z()),
+                    Vertex::new(Point3::new(1.0, 0.0, 0.0), nalgebra::Vector3::z()),
+                    Vertex::new(Point3::new(0.0, 1.0, 0.0), nalgebra::Vector3::z()),
+                ], None),
+                Polygon::new(vec![
+                    Vertex::new(Point3::new(0.0, 1.0, 0.0), nalgebra::Vector3::z()), // Shared vertex
+                    Vertex::new(Point3::new(1.0, 0.0, 0.0), nalgebra::Vector3::z()), // Shared vertex
+                    Vertex::new(Point3::new(1.0, 1.0, 0.0), nalgebra::Vector3::z()), // New vertex
+                ], None),
+            ],
+            bounding_box: std::sync::OnceLock::new(),
+            metadata: None,
+        };
+
+        let indexed: IndexedMesh<()> = mesh.into();
+
+        // Should have 4 unique vertices (3 from first triangle + 1 new from second)
+        assert_eq!(indexed.vertices.len(), 4, "Should deduplicate shared vertices");
+
+        // Should have 2 faces
+        assert_eq!(indexed.faces.len(), 2, "Should preserve all faces");
+
+        // Verify all face indices are valid
+        assert!(indexed.validate_face_indices().is_ok(), "All face indices should be valid");
+    }
+
+    #[test]
+    fn test_conversion_large_mesh() {
+        // Test conversion with larger mesh to ensure scalability
+        let sphere_mesh = Mesh::sphere(1.0, 16, 12, None::<()>).unwrap();
+
+        // Should achieve significant deduplication
+        let original_vertices: usize = sphere_mesh.polygons.iter()
+            .map(|p| p.vertices.len())
+            .sum();
+
+        let indexed: IndexedMesh<()> = sphere_mesh.into();
+
+        // Should handle larger meshes without issues
+        assert!(!indexed.vertices.is_empty(), "Large mesh should convert vertices");
+        assert!(!indexed.faces.is_empty(), "Large mesh should convert faces");
+        assert!(indexed.validate_face_indices().is_ok(), "Large mesh conversion should be valid");
+        assert!(indexed.vertices.len() < original_vertices,
+            "Should achieve vertex deduplication: {} < {}", indexed.vertices.len(), original_vertices);
+    }
+
+    #[cfg(any(feature = "f64", feature = "f32"))]
+    #[test]
+    fn test_conversion_physics_integration() {
+        // Test physics-related conversion methods
+        let cube_mesh = Mesh::cube(1.0, None::<()>).unwrap();
+        let indexed: IndexedMesh<()> = cube_mesh.into();
+
+        // Test mass properties calculation
+        let density = 1000.0; // kg/m³
+        let mass_props = indexed.mass_properties(density);
+        assert!(mass_props.is_some(), "Mass properties should be calculable");
+        let (mass, center_of_mass, _) = mass_props.unwrap();
+        assert!(mass > 0.0, "Mass should be positive");
+        assert!(center_of_mass.coords.norm() < 0.1, "Center of mass should be near origin for symmetric shape");
+
+        // Test Rapier shape creation (rigid body creation requires external state)
+        let rapier_shape = indexed.to_rapier_shape();
+        assert!(rapier_shape.is_some(), "Should create Rapier shape");
+
+        // Test collider creation
+        let collider = indexed.to_trimesh();
+        assert!(collider.is_some(), "Should create collider");
+    }
+
+    #[cfg(feature = "bevymesh")]
+    #[test]
+    fn test_conversion_bevy_integration() {
+        // Test Bevy mesh conversion
+        let cube_mesh = Mesh::cube(1.0, None::<()>).unwrap();
+        let indexed: IndexedMesh<()> = cube_mesh.into();
+
+        let bevy_mesh = indexed.to_bevy_mesh();
+
+        // Bevy mesh should have positions and indices
+        assert!(bevy_mesh.count_vertices() > 0, "Bevy mesh should have vertices");
+        assert!(bevy_mesh.indices().is_some(), "Bevy mesh should have indices");
+
+        // Should be triangulated
+        let indices = bevy_mesh.indices().unwrap();
+        assert_eq!(indices.len() % 3, 0, "Bevy mesh should be triangulated (indices divisible by 3)");
+    }
+}
